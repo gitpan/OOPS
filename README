@@ -45,7 +45,7 @@ DESCRIPTION
 
      create OOPS instance
 
-     load some ojbects
+     access some ojbects
 
      modify some objects
 
@@ -108,12 +108,40 @@ SUPPORTED PLATFORMS
     mysql          OOPS has been tested with mysql 4.0.16 and 4.0.18 using
                    InnoDB tables.
 
-    Perl versions 5.8.2 and 5.8.3 are supported. Prior to 5.8.2, it wasn't
-    possible to untie scalars from within the a tied scalar access method.
-    An ugly workaround is possible if there is enough interest.
+    SQLite         OOPS has been tested with DBD::SQLite 0.31. With SQLite,
+                   an additional parameter to "OOPS->new()" is recognized:
+                   "default_synchronous". Possible values are:
 
-    OOPS has been tested on Linux 2.4.23 (Debian unstable as of April '04)
-    and on DragonflyBSD prerelease.
+                   FULL    Sync() all transactions to disk before returning.
+
+                   NORMAL  The default: sync() at critical moments only -
+                           protects against program failure, but not all
+                           power or OS failures.
+
+                   OFF     Don't sync() at all and go really fast.
+
+                   SQLite is not 8-bit clean with respect to "\0". OOPS uses
+                   a DBD::SQLite feature to translate binary nulls. A
+                   side-effect is that backslash will be doubled "\" ->
+                   "\\". OOPS does not use the "counters" table with SQLite.
+
+    Perl versions 5.8.2 through 5.8.4 are supported. Prior to 5.8.2, it
+    wasn't possible to untie scalars from within the a tied scalar access
+    method. An ugly workaround is possible if there is enough interest.
+
+    OOPS has been tested on Linux 2.4.23 (Debian unstable as of April '04);
+    on FreeBSD 4.9; and on DragonflyBSD prerelease.
+
+    As far as performance goes, mysql and SQLite are both about twice as
+    fast as PostgreSQL for applications that only have one transaction at at
+    time. SQLite is particularly slow when there are multiple transactions
+    as its lock grangularity is the entire database. Mysql also slows down
+    when there are multiple simultaneous transactions. I don't know yet
+    which backend is fastest for applications with many simultanous
+    transactions.
+
+    The RDBMS schema for SQLite is different than for mysql or PostgreSQL
+    (which are the same as each other).
 
 FUNCTIONS
     "transaction($funcref, @args)"
@@ -144,7 +172,7 @@ FUNCTIONS
 
          $ref = getref(%hash, $key);
 
-        Alternatively, use "$oops-"workaround27555($ref)>.
+        Alternatively, use "$oops->workaround27555($ref)".
 
         Getref() and workaround27555() work around all the perl bugs with
         tied hash key references. Failure to use them may result in
@@ -202,15 +230,26 @@ PUBLIC OBJECT METHODS
 
         Alternatively, use "getref(%hash, $key)".
 
-ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
-    OOPS has been thoroughly tested. At this time of the initial release,
-    OOPS has no current users. Do not let that stop you from trying it. The
-    regression suite is very well developed: there is twice as much code in
-    the test suite as there is in the module itself. The suite does over
-    1.5million tests. On my fastest computer it takes over six hours to run.
-    I have so much confidence in my test suite, I'm offering a bounty on
-    bugs!
+    "->dbh()"
+        This returns the main DBI database handle used by OOPS. This
+        function is provided for those who want to hand-write queries.
+        Please note: no changes are written to the DBMS until commit().
 
+    "->load_object($id)"
+        This will load a persistent object by number. It returns the object
+        or undef if the object doesn't exists. This function is provided for
+        those who want to hand-write queries.
+
+ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
+    OOPS has been thoroughly tested. As this is written, there are no known
+    users of OOPS. Don't let this stop you from using it! Someone has to go
+    first. The regression suite is very well developed: there is twice as
+    much code in the test suite as there is in the module itself. The suite
+    does over 1.5million tests. On my fastest computer it takes over six
+    hours to run. I have so much confidence in my test suite, I'm offering a
+    bounty on bugs!
+
+  Bug Bounty
     I'll pay (via paypal) US$5.00 to anyone who submits a new bug (with
     regression test) that is caused by a problem in my OOPS module. To
     qualify, bugs must be serious: they must cause data corruption, false
@@ -221,7 +260,14 @@ ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
   Known fixable bugs in OOPS
     memory leaks
         OOPS currently has memory leaks. This may or may not matter to your
-        application. The leaks do not appear to be serious.
+        application. The rate of leakage varies depending on which RDBMS is
+        used. SQLite seems to have the most significant problems.
+
+    Schema error with mysql
+        There is an error in the schema that OOPS uses with mysql. This
+        error does not cause any problems with the versions of mysql that
+        OOPS has been tested with (4.0.16 and 4.0.18). This error will be
+        fixed in the next version of OOPS.
 
     delayed DESTROY
         Additional references to the in-memory copies of persistent data are
@@ -256,6 +302,11 @@ ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
         inaccessable. I list this here so nobody claims a bounty for
         breaking OOPS in this way.
 
+    DBD::Pg and ASCII NULL
+        DBD::Pg does not easily support ASCII NULL. OOPS has only partial
+        support for ASCII NULL with PostgreSQL: don't have ASCII NULL in
+        your class names.
+
   Bugs in perl that effect OOPS
     references to hash keys
         Persistent hashes are implemented with tie. There are bugs with
@@ -285,9 +336,16 @@ ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
 
     tied arrays don't work right
         There are a couple of bugs with tied arrays that prevent OOPS from
-        using them. <http://rt.perl.org/rt3/Ticket/Display.html?id=22571>
+        using them: <http://rt.perl.org/rt3/Ticket/Display.html?id=22570>
         and <http://rt.perl.org/rt3/Ticket/Display.html?id=22571>. This
         isn't a big deal unless you've got big arrays.
+
+    SQLite and perl's malloc().
+        If SQLite is used with a perl that has been compiled to use perl's
+        "malloc()", it will report LOTS of "Bad free() ignored (PERL_CORE)"
+        errors. It is not currently known if these errors are harmfull
+        beyond generating lots of output to STDERR. The default perl
+        configuration on FreeBSD uses perl's "malloc()".
 
 FUTURE DIRECTIONS
     OOPS isn't done. There are a bunch of things that I am considering
@@ -433,6 +491,10 @@ WRITING SQL QUERIES BY HAND
                           the underlying database will support as it's
                           largest blob.
 
+                fragno    Blob fragment number. This column only exists with
+                          SQLite. SQLite has a smallish maximum row size and
+                          so big values must be split into multiple rows.
+
     REFs are are special. There are several types of REFs: references to
     scalar values; references to objects; secondary references to scalar
     values; references to scalar values that are part of another object
@@ -561,7 +623,7 @@ WRITING SQL QUERIES BY HAND
     If you construct a query like these examples that return object id's,
     then use "$object = $oops->load_object($id)" to load them into memory.
 
-    I reccomend that hand-written queries by read-only as there are
+    I reccomend that hand-written queries be read-only as there are
     additional columns that must be kept consistent. For example, the object
     table includes a reference count column to handle garbage collection of
     the persistent data.
@@ -691,31 +753,34 @@ LICENSE
     IV.    All useful modifications to this software must be licensed back
            to the original licensor such that the original licensor can
            relicense the modifications to third parties under terms of their
-           own choosing with no restrictions whatsoever and need not even
-           acknowledge the origin of such modifications. An easy way to
-           accomplish this is to put all such modifications into the public
-           domain.
+           own choosing with no restrictions whatsoever and no need to even
+           acknowledge the origin of such modifications. There are two easy
+           ways to accomplish this: put all such modifications into the
+           public domain or assign the copyright to the original licensor.
 
-    V.     Under this license, use, modification, and redistribution of this
-           software is expressly forbidden to all entities that have
-           willfully violated an open source license. For example, SCO for
-           violating the GPL.
+    V.     Entities that have willfully violated an open source license are
+           excluded from this license. For example, SCO for violating the
+           GPL.
 
-    VI.    Under this license, use, modification, and redistribution of this
-           software is expressly forbidden to all entities that have
-           attempted to enforce a software patent (except as a defensive
-           move like IBM's counter to SCO). For example, Unisys for
-           enforcing a patent on GIF image creation.
+    VI.    Entities that have attempted to enforce a software patent (except
+           as a defensive move like IBM's counter to SCO) are excluded from
+           this license. For example, Unisys for enforcing a patent on GIF
+           image creation.
 
-    VII.   Under this license, use, modification, and redistribution of this
-           software is expressly forbidden to all entities that engage in or
-           encourage sending SPAM emails.
+    VII.   Entities that engage in or encourage sending SPAM emails are
+           excluded from this license.
 
-    VIII.  Under this license, use, modification, and redistribution of this
-           software is expressly forbidden to all entities that challenges
-           this license in court.
+    VIII.  Entities that are or have challenged this license in court are
+           excluded from this license.
 
-    IX.    This license does not apply to the following entities or their
-           sucessors or subsideraries: Network Solutions; Verisign; ICANN;
-           and Internet-Journals.
+    IX.    The following entities are excluded from this license: Network
+           Solutions; Verisign; ICANN; and Internet-Journals.
+
+    X.     Entities that share a 5% or more common ownership interest with
+           an excluded entity are also excluded from this license.
+
+    XI.    Entities that are excluded from this license are forbidden to
+           use, copy, modify, or redistribute the covered software.
+
+    This is version 1.1 of the Play-Fair-To-Play Sofware License.
 

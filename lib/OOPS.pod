@@ -49,7 +49,7 @@ At this time, OOPS is expecting a web-like workflow:
 
  create OOPS instance
 
- load some ojbects
+ access some ojbects
 
  modify some objects
 
@@ -112,22 +112,59 @@ The following RDBMSs are supported in the code:
 
 =item PostgreSQL
 
-OOPS has been tested with PostgreSQL version 7.4.2 and 7.3.5.  
-7.4.2 on Linux 2.4.23 performs okay.  7.3.5 on pre-release DragonflyBSD is 
-slow. 
+OOPS has been tested with PostgreSQL version 7.4.2 and 7.3.5.  7.4.2 on
+Linux 2.4.23 performs okay.  7.3.5 on pre-release DragonflyBSD is slow.
 
 =item mysql
 
 OOPS has been tested with mysql 4.0.16 and 4.0.18 using InnoDB tables. 
 
+=item SQLite
+
+OOPS has been tested with DBD::SQLite 0.31.  With SQLite, an additional
+parameter to C<OOPS-E<gt>new()> is recognized: C<default_synchronous>.
+Possible values are:
+
+=over 8
+
+=item FULL
+
+Sync() all transactions to disk before returning.
+
+=item NORMAL
+
+The default: sync() at critical moments only - protects against program
+failure, but not all power or OS failures.
+
+=item OFF
+
+Don't sync() at all and go really fast.
+
 =back
 
-Perl versions 5.8.2 and 5.8.3 are supported.  Prior to 5.8.2, it wasn't
+SQLite is not 8-bit clean with respect to C<\0>.  OOPS uses a DBD::SQLite
+feature to translate binary nulls.  A side-effect is that backslash
+will be doubled C<\> -> C<\\>.  OOPS does not use the C<counters> table
+with SQLite.
+
+=back
+
+Perl versions 5.8.2 through 5.8.4 are supported.  Prior to 5.8.2, it wasn't
 possible to untie scalars from within the a tied scalar access method.
 An ugly workaround is possible if there is enough interest.
 
-OOPS has been tested on Linux 2.4.23 (Debian unstable as of April '04)
-and on DragonflyBSD prerelease.
+OOPS has been tested on Linux 2.4.23 (Debian unstable as of April '04);
+on FreeBSD 4.9; and on DragonflyBSD prerelease.
+
+As far as performance goes, mysql and SQLite are both about twice as fast
+as PostgreSQL for applications that only have one transaction at at time.
+SQLite is particularly slow when there are multiple transactions as its
+lock grangularity is the entire database.  Mysql also slows down when
+there are multiple simultaneous transactions.  I don't know yet which
+backend is fastest for applications with many simultanous transactions.
+
+The RDBMS schema for SQLite is different than for mysql or PostgreSQL
+(which are the same as each other). 
 
 =head1 FUNCTIONS
 
@@ -163,7 +200,7 @@ L<http://rt.perl.org/rt3/Ticket/Display.html?id=29224>.
 
  $ref = getref(%hash, $key);
 
-Alternatively, use C<$oops->workaround27555($ref)>.
+Alternatively, use C<$oops-E<gt>workaround27555($ref)>.
 
 Getref() and workaround27555() work around all the perl bugs
 with tied hash key references.  Failure to use them may result
@@ -232,16 +269,31 @@ See L<http://rt.perl.org/rt3/Ticket/Display.html?id=27555>.
 
 Alternatively, use C<getref(%hash, $key)>.
 
+=item C<-E<gt>dbh()>
+
+This returns the main DBI database handle used by OOPS.  This function
+is provided for those who want to hand-write queries.  Please note: no
+changes are written to the DBMS until commit().
+
+=item C<-E<gt>load_object($id)>
+
+This will load a persistent object by number.  It returns the object
+or undef if the object doesn't exists.  This function is provided for
+those who want to hand-write queries.
+
 =back
 
 =head1 ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
 
-OOPS has been thoroughly tested.  At this time of the initial release,
-OOPS has no current users.  Do not let that stop you from trying it.
-The regression suite is very well developed: there is twice as much code
-in the test suite as there is in the module itself.  The suite does over
-1.5million tests.  On my fastest computer it takes over six hours to run.
-I have so much confidence in my test suite, I'm offering a bounty on bugs!
+OOPS has been thoroughly tested.  As this is written, there are no known
+users of OOPS.  Don't let this stop you from using it!  Someone has
+to go first.  The regression suite is very well developed: there is
+twice as much code in the test suite as there is in the module itself.
+The suite does over 1.5million tests.  On my fastest computer it takes
+over six hours to run.  I have so much confidence in my test suite,
+I'm offering a bounty on bugs!
+
+=head2 Bug Bounty
 
 I'll pay (via paypal) US$5.00 to anyone who submits a new bug (with
 regression test) that is caused by a problem in my OOPS module.
@@ -257,7 +309,15 @@ I'll report the number of bounties paid in the CHANGELOG.
 =item memory leaks
 
 OOPS currently has memory leaks. This may or may not matter to your
-application.  The leaks do not appear to be serious.
+application.  The rate of leakage varies depending on which RDBMS is
+used.  SQLite seems to have the most significant problems. 
+
+=item Schema error with mysql
+
+There is an error in the schema that OOPS uses with mysql.  This
+error does not cause any problems with the versions of mysql that
+OOPS has been tested with (4.0.16 and 4.0.18).  This error will
+be fixed in the next version of OOPS.
 
 =item delayed DESTROY
 
@@ -294,6 +354,12 @@ remember blessings when there is a reference.
 If you re-bless the OOPS object, your data is likely to become
 inaccessable.  I list this here so nobody claims a bounty for breaking
 OOPS in this way.
+
+=item DBD::Pg and ASCII NULL
+
+DBD::Pg does not easily support ASCII NULL.  OOPS has only partial
+support for ASCII NULL with PostgreSQL: don't have ASCII NULL in your 
+class names.
 
 =back
 
@@ -332,9 +398,17 @@ exist in 5.8.2.
 =item tied arrays don't work right
 
 There are a couple of bugs with tied arrays that prevent OOPS from
-using them.  L<http://rt.perl.org/rt3/Ticket/Display.html?id=22571>
+using them: L<http://rt.perl.org/rt3/Ticket/Display.html?id=22570>
 and L<http://rt.perl.org/rt3/Ticket/Display.html?id=22571>.  This isn't
 a big deal unless you've got big arrays.
+
+=item SQLite and perl's malloc().
+
+If SQLite is used with a perl that has been compiled to use perl's
+C<malloc()>, it will report LOTS of C<Bad free() ignored (PERL_CORE)>
+errors.  It is not currently known if these errors are harmfull beyond
+generating lots of output to STDERR.  The default perl configuration on
+FreeBSD uses perl's C<malloc()>.
 
 =back
 
@@ -562,6 +636,12 @@ The hash key or array index.
 The hash value or array value.  Limited to whatever the
 underlying database will support as it's largest blob.
 
+=item fragno
+
+Blob fragment number.  This column only exists with SQLite.  SQLite has a
+smallish maximum row size and so big values must be split into multiple
+rows.
+
 =back
 
 =back
@@ -704,7 +784,7 @@ idea...
 If you construct a query like these examples that return object id's, then
 use C<$object = $oops-E<gt>load_object($id)> to load them into memory.
 
-I reccomend that hand-written queries by read-only as there are 
+I reccomend that hand-written queries be read-only as there are 
 additional columns that must be kept consistent.  For example, the
 object table includes a reference count column to handle garbage
 collection of the persistent data.
@@ -814,7 +894,7 @@ All rights reserved except as granted by a license or contract.  This
 module is licensed both commercially and as free software.  The free
 software license follows.
 
-B<The Play-Fair-To-Play Software License>
+B<The Play-Fair-To-Play Software License> 
 
 Preamble.
 
@@ -863,41 +943,49 @@ correction.
 All useful modifications to this software must be licensed back to the
 original licensor such that the original licensor can relicense the
 modifications to third parties under terms of their own choosing with
-no restrictions whatsoever and need not even acknowledge the origin of
-such modifications.  An easy way to accomplish this is to put all such
-modifications into the public domain.
+no restrictions whatsoever and no need to even acknowledge the origin
+of such modifications.  There are two easy ways to accomplish this: put
+all such modifications into the public domain or assign the copyright
+to the original licensor.
 
 =item V.
 
-Under this license, use, modification, and redistribution of this software
-is expressly forbidden to all entities that 
-have willfully violated an open source license.  For example, SCO for
-violating the GPL.  
+Entities that have willfully violated an open source license are 
+excluded from this license.
+For example, SCO for violating the GPL.  
 
 =item VI.
 
-Under this license, use, modification, and redistribution of this software
-is expressly forbidden to all entities that have attempted to enforce a
-software patent (except as a defensive move like IBM's counter to SCO).
+Entities that have attempted to enforce a software patent (except as a
+defensive move like IBM's counter to SCO) are excluded from this license.
 For example, Unisys for enforcing a patent on GIF image creation.
 
 =item VII.
 
-Under this license, use, modification, and redistribution of this software
-is expressly forbidden to all entities that 
-engage in or encourage sending SPAM emails.
+Entities that engage in or encourage sending SPAM emails are excluded 
+from this license.
 
 =item VIII.
 
-Under this license, use, modification, and redistribution of this software
-is expressly forbidden to all entities that 
-challenges this license in court.
+Entities that are or have challenged this license in court are excluded
+from this license.
 
 =item IX.
 
-This license does not apply to the following entities or their
-sucessors or subsideraries: Network Solutions; Verisign; ICANN; and
-Internet-Journals.
+The following entities are excluded from this license:
+Network Solutions; Verisign; ICANN; and Internet-Journals.
+
+=item X.
+
+Entities that share a 5% or more common ownership interest with an
+excluded entity are also excluded from this license. 
+
+=item XI.
+
+Entities that are excluded from this license are forbidden to use, copy,
+modify, or redistribute the covered software.
 
 =back
+
+This is version 1.1 of the Play-Fair-To-Play Sofware License.
 

@@ -32,7 +32,7 @@ use diagnostics;
 use OOPS::TestCommon;
 
 
-print "1..2208\n";
+print "1..2204\n";
 
 
 resetall; # --------------------------------------------------
@@ -109,7 +109,7 @@ resetall; # --------------------------------------------------
 }
 resetall; # --------------------------------------------------
 {
-
+	nocon;
 	qcheck "select * from TP_attribute where id != 2", <<END;
 		+----+------------------+-------+-------+
 		| id | pkey             | pval  | ptype |
@@ -117,11 +117,11 @@ resetall; # --------------------------------------------------
 		+----+------------------+-------+-------+
 END
 
+	rcon;
 	my $c = $r1->load_object(3);
 	$c->{foo} = 9;
 	$r1->commit;
-	rcon;
-
+	nocon;
 
 	qcheck "select * from TP_attribute where id != 2", <<END;
 		+----+------------------+-------+-------+
@@ -131,20 +131,22 @@ END
 		+----+------------------+-------+---+---+
 END
 
+	rcon;
 	my $no = $r1->{named_objects};
 	$no->{myobject} = [ 'abc', 'xyz' ];
 	$r1->commit;
-	rcon;
+	nocon;
 
+	my $oi = $dbms eq 'sqlite' ? 101 : 111;
 
 	qcheck "select * from TP_attribute where id != 2", <<END;
 		+-----+----------+------+-------+
 		| id  | pkey     | pval | ptype |
 		+-----+----------+------+-------+
-		|   1 | myobject | 111  | R     |
+		|   1 | myobject | $oi  | R     |
 		|   3 | foo      | 9    | 0     |
-		| 111 | 0        | abc  | 0     |
-		| 111 | 1        | xyz  | 0     |
+		| $oi | 0        | abc  | 0     |
+		| $oi | 1        | xyz  | 0     |
 		+-----+----------+------+-------+
 END
 
@@ -188,6 +190,7 @@ if ($multiread) {
 	delete $r2->{named_objects}{a};
 	$r2->commit;
 
+	nocon;
 	nodata;
 }
 resetall; # --------------------------------------------------
@@ -262,7 +265,7 @@ if (0) {
 
 	$r1->object_refcount($foo, 1);
 	$r1->commit;
-	rcon;
+	nocon;
 
 
 	qcheck "select * from TP_attribute", <<END;
@@ -282,8 +285,7 @@ if (0) {
 		|  7 | K2               | 5     | 1     |
 		+----+------------------+-------+-------+
 END
-
-
+	rcon;
 	samesame($foo, $r1->load_object(4));
 
 	rcon;
@@ -381,7 +383,7 @@ resetall; # --------------------------------------------------
 	delete $r1->{named_objects}{h2};
 	delete $r1->{named_objects}{h3};
 	$r1->commit;
-	rcon;
+	nocon;
 	nodata;
 }
 resetall; # --------------------------------------------------
@@ -741,7 +743,7 @@ resetall; # --------------------------------------------------
 	delete $r1->{named_objects}{e4};
 	delete $r1->{named_objects}{e5};
 	$r1->commit;
-	rcon;
+	nocon;
 	nodata;
 }
 resetall; # --------------------------------------------------
@@ -758,7 +760,12 @@ resetall; # --------------------------------------------------
 	rcon;
 
 	my (@k) = sort keys %{$r1->load_object(2)};
-	my (@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'user objects');
+	my @kk;
+	if ($dbms eq 'sqlite') {
+		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'last reserved object id', 'user objects');
+	} else {
+		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'user objects');
+	}
 
 
 	samesame(\@k, \@kk);

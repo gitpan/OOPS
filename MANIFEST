@@ -4,7 +4,10 @@ lib/OOPS.pm
 lib/OOPS.pod
 lib/OOPS/mysql.pm
 lib/OOPS/pg.pm
+lib/OOPS/sqlite.pm
 lib/OOPS/TestCommon.pm
+t/ab-loopspeed.t
+t/blobsize.t
 t/bug-array.t
 t/bug-refs.t
 t/db-slowtest.t
@@ -20,6 +23,7 @@ t/ndb-ref.t
 t/ndb-ref2.t
 t/ndb-scalarhash.t
 t/ndb-z-array.t
+t/nulls.t
 t/perlworks.t
 t/perlworks2.t
 t/pod.t
@@ -28,11 +32,14 @@ t/ref2.t
 t/scalarhash.t
 t/slowtest.t
 t/tran1.t
+t/tran1a.t
 t/tran2.t
 t/tran3.t
 t/tran4.t
 t/tran5.t
+t/tran5a.t
 t/z-array.t
+t/zzz-drop.t
 CHANGELOG
 MANIFEST
 META.yml

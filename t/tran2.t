@@ -55,21 +55,23 @@ a:
 	resetall; 
 	$r1->{named_objects}{root} = {};
 	$r1->commit;
+	nocon;
 ab:
 	lockcommon();
 	$common = getcommon;
 	$common->{$pn} = 0;
 	setcommon($common);
 	unlockcommon();
-ab:
-	rcon;
 a:
+	rcon;
 	$r1->{named_objects}{root}{$pn} = $$;
 	$r1->commit;
+	nocon;
 b:
 	rcon;
 	$r1->{named_objects}{root}{$pn} = $$;
 	$r1->commit;
+	nocon;
 ab:
 	transaction(sub {
 		rcon;
@@ -77,12 +79,15 @@ ab:
 		$r1->{named_objects}{root}{$pn} = "x$$";
 		$r1->commit;
 	});
+	nocon;
 ab:
+	rcon;
 	my $r = $r1->{named_objects}{root};
 	test($r->{d}, "a victor: $r->{d}");
 	if ($r->{d} eq "x$$") {
 		test($r->{$pn} eq "x$$", "confirmation");
 	}
+	nocon;
 }
 
 print "# ---------------------------- done ---------------------------\n" if $debug;

@@ -65,7 +65,7 @@ a:
 		}
 	);
 	$r1->commit;
-	rcon;
+	nocon;
 	groupmangle('manygroups');
 	rcon;
 	my (@bal) = map(values %{$r1->{named_objects}{$_}}, qw(joe jane bob));
@@ -73,6 +73,7 @@ a:
 	test(sum(@bal) == 100, "coins @bal");
 	use warnings;
 	$r1->DESTROY;
+	nocon;
 
 ab:
 	if ($x > $looplength/2) {
@@ -88,6 +89,7 @@ ab:
 	};
 	test(! $@ || $@ =~ /$transfailrx/, $@);
 	$r1->DESTROY;
+	nocon;
 b:
 	rcon;
 	my (@bal) = map(values %{$r1->{named_objects}{$_}}, qw(joe jane bob));
@@ -95,6 +97,7 @@ b:
 	test(sum(@bal) == 100, "coins @bal");
 	use warnings;
 	$r1->DESTROY;
+	nocon;
 ab:
 }
 

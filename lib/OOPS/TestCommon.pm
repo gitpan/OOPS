@@ -10,7 +10,9 @@ package OOPS::TestCommon;
 	$fe
 	$okay
 	$ocut
+	$bbs
 	$basecount
+	$dbms
 	notied
 	nodata
 	test
@@ -23,6 +25,7 @@ package OOPS::TestCommon;
 	resetall
 	groupmangle
 	check_refcount
+	nocon
 	rcon
 	rcon12
 	nukevar
@@ -63,13 +66,28 @@ require Exporter;
 select(STDOUT);
 $| = 1;
 
-our $debug = 0;
+our $debug = 1;
 
 our $multiread = 0;
 
 our $test_dsn;
+
+BEGIN	{
+	$test_dsn = $ENV{OOPSTEST_DSN};
+
+	unless ($test_dsn || eval { require DBD::SQLite } ) {
+		print "1..0 # Skipped: this test requires \$OOPSTEST_DSN to be set or DBD::SQLite to be installed\n";
+		exit 0;
+	}
+}
+
 our $test_user = $ENV{OOPSTEST_USER};
 our $test_pass = $ENV{OOPSTEST_PASS};
+
+unless ($test_dsn) {
+	# we know we've got SQLite..
+	$test_dsn = "DBI:SQLite:dbname=/tmp/OOPStest.$$.db"
+}
 
 our (%args) = (
 	dbi_dsn		=> $test_dsn, 
@@ -79,23 +97,13 @@ our (%args) = (
 	no_front_end	=> 1,
 );
 
-$OOPS::bigcutoff = 50;
-
-BEGIN	{
-	$test_dsn = $ENV{OOPSTEST_DSN};
-
-	unless ($test_dsn) {
-		print "1..0 # Skipped: this test requires \$OOPSTEST_DSN to be set\n";
-		exit 0;
-	}
-}
+$args{default_synchronous} = 'OFF' if $test_dsn =~ /^DBI:SQLite:/i;
 
 our $fe;
 our ($r1, $r2);
 
 our $okay = 1;
 
-our $ocut = $OOPS::bigcutoff;
 
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Useperl = 1;
@@ -106,7 +114,12 @@ delete $SIG{__DIE__};
 
 our $basecount;
 
-OOPS->initial_setup(%args) || die;
+our $dbms = OOPS->initial_setup(%args) || die;
+
+$OOPS::bigcutoff = 50;
+$OOPS::sqlite::big_blob_size = 60;
+our $ocut = $OOPS::bigcutoff;
+our $bbs = $OOPS::sqlite::big_blob_size;
 
 sub eline
 {
@@ -184,6 +197,7 @@ sub nodata
 	my $pm = $msg || '';
 	$pm =~ s/\A\s*(.*?)\s*\Z/$1/s;
 	$pm =~ s/\n\s*/\\n /g;
+	$pm = "database is empty" unless $pm;
 	print "ok $okay - line$line # $pm\n";
 	$okay++;
 
@@ -283,7 +297,6 @@ sub docompare
 	return 0;
 }
 
-
 sub qcheck
 {
 	my ($q, $picture, @extra) = @_;
@@ -366,7 +379,7 @@ sub rowcount
 {
 	my (@tables) = @_;
 
-	my $t = "TP_object TP_attribute TP_big TP_counters";
+	my $t = "TP_object TP_attribute TP_big";
 	$t =~ s/TP_/$args{table_prefix}/g;
 	@tables = split(" ", $t)
 		unless @tables;
@@ -400,12 +413,16 @@ sub resetall
 	notied('at reset', $line)
 		unless $force;
 
-	OOPS->db_domany({ %args }, <<END . OOPS->db_initial_values());
-		DELETE FROM TP_object;
-		DELETE FROM TP_attribute;
-		DELETE FROM TP_big;
-		DELETE FROM TP_counters;
-END
+	no strict 'refs';
+	my $x;
+	for my $t (&{"OOPS::${dbms}::table_list"}()) {
+		$x .= "DELETE FROM $t;\n";
+	}
+	OOPS->db_domany({ %args }, 
+		$x 
+		. OOPS->db_initial_values() 
+		. &{"OOPS::${dbms}::db_initial_values"}());
+	use strict;
 	
 
 	$basecount = rowcount() unless defined $basecount;
@@ -504,6 +521,13 @@ sub check_refcount
 	$okay++;
 }
 
+sub nocon
+{
+	undef $fe;
+	undef $r1;
+	undef $r2;
+}
+
 sub rcon
 {
 	my ($msg, $skipref) = @_;
@@ -560,6 +584,7 @@ sub runtest
 					$r = rvsamesame($n1->{root}, $r1->{named_objects}{root});
 					return "POSTCOMMIT\n$r" if $r;
 				}
+				nocon;
 				check_refcount(__LINE__, 'die');
 				rcon(undef, 'skipref');
 				if ($look & 0x10) {
@@ -579,10 +604,12 @@ sub runtest
 					$r = rvsamesame($n1->{root}, $r1->{named_objects}{root});
 					return "PRERECONNECT\n$r" if $r;
 				}
+				nocon;
 				check_refcount(__LINE__, 'die');
 				rcon(undef, 'skipref');
 				$r = rvsamesame($n1->{root}, $r1->{named_objects}{root});
 				return "POSTRECONNECT\n$r" if $r;
+				nocon;
 				check_refcount(undef, 'die');
 				return 0;
 			};

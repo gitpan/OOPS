@@ -760,12 +760,14 @@ print "# block at ".__LINE__."\n";
 print "# block at ".__LINE__."\n";
 {
 	my $x = 'foobar';
-	my $y = \$x;
-	bless $y, 'baz';
-	$y = 7;
-	$y = \$x;
-	my $z = ref($y);
-	ok($z eq 'baz'); 
+	{
+		my $y = \$x;
+		bless $y, 'baz';
+		undef $y;
+	}
+	my $a = \$x;
+	my $b = ref($a);
+	ok($b eq 'baz'); 
 }
 
 #

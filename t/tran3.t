@@ -59,11 +59,11 @@ a:
 	mconst;
 	$r1->commit;
 #system("psql rectangle -c 'select * from attribute'");
-	rcon;
+	nocon;
 	groupmangle('manygroups');
 
-
 a:
+	rcon;
 	my $joe = $r1->{named_objects}{accounts}{joe};
 	$joe->{balance} -= 10;
 	$r1->rollback;
@@ -72,6 +72,7 @@ a:
 #system("psql rectangle -c 'select * from attribute'");
 	mconst;
 	$r1->DESTROY;
+	nocon;
 
 b:
 	rcon;
@@ -84,6 +85,7 @@ b:
 #system("psql rectangle -c 'select * from attribute'");
 	mconst;
 	$r1->DESTROY;
+	nocon;
 
 ab:
 

@@ -7,7 +7,7 @@ BEGIN {
 		exit;
 	}
 
-	$OOPS::SelfFilter::defeat = 0
+	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
 
 	for my $m (qw(Data::Dumper Clone::PP)) {
@@ -31,7 +31,7 @@ import Clone::PP qw(clone);
 
 my $skipto = 0;
 
-print "1..245574\n";
+print "1..58818\n";
 my $debug2 = 1;
 my $debug3 = 0;
 
@@ -107,53 +107,30 @@ END
 
 		if ($flag =~ /h/) {
 			@key = (qw(
-				'okey'
-				'udkey'
-				'akey'
-				'hkey'
-				'0'
 				''
-				'skey'
-				'newkey'
-				'rkey1'
-				'rkey2'
-				'rkey3'
-				'eskey'
-				'0key'
 				undef
-			));
+				"0\000"
+				"0"
+				chr(0)
+				"With\000inside"
+				"with\\back"
+			), '"0 but true"');
 		} elsif ($flag =~ /a/) {
-			@key = (3, 0, 1, 2, 4..10);
+			@key = (0..7);
 		} 
 
 
 		no warnings qw(syntax);
 		my (@val) = $flag =~ /v/
 			? (qw( 
-				{} 
-				getref(%$root,'udkey')
-				\$root->{akey}[3]
-				getref(%$root,'okey')
-				getref(%{$root->{hkey}},'skey2')
-				$root
 				''
-				'0'
-				'12'
 				undef
-				'xyz' 
-				[] 
-				['a','b',7] 
-				{x=>1,y=>'z'} 
-				$root->{akey}
-				$root->{skey}
-				$root->{hkey} 
-				$root->{rkey} 
-				$root->{okey} 
-				scalar("abcd"x($ocut/4+1)) 
-				\'rval2'
-				\[7,8,9]
-				\{n=>'m'}
-			))
+				"0\000"
+				"0"
+				chr(0)
+				"With\0inside"
+				"with\\back"
+			), '"0 but true"')
 #XXX						\$z
 			: ( '1' );
 		use warnings;
@@ -173,15 +150,13 @@ END
 			+ 1					# notied
 			;
 		my $per_loop = $base_per_loop + $skippre_per_loop + $skippost_per_loop;
-		my $expected = $okay + $loops * ($per_loop + $nodata_per_loop);
-		print "# $test\n";
-		printf "# per_loop = %d ( 9 + flag:%s + pre:%s + post:%s + nodata:%s : expected = %s)\n",
+		printf "# per_loop = %d ( 9 + flag:%s + pre:%s + post:%s + nodata:%s )\n",
 			$per_loop,  
 			(($flag =~ /V/) ? 1 : 0),
 			$skippre_per_loop,
 			$skippost_per_loop,
-			$nodata_per_loop,
-			$expected;
+			$nodata_per_loop;
+		my $expected = $okay + $loops * ($per_loop + $nodata_per_loop);
 		if ($expected < $skipto) {
 			$okay = $expected;
 			next;
@@ -217,7 +192,7 @@ END
 END
 
 				eval $e;
-				die "on $test/$val/$key ... $e ... $@" if $@;
+				die "on $test/$val/$key ... <<$e>> ... $@" if $@;
 
 				for my $skips (@skips) {
 					my $skippre = substr($skips, 0, 1);
@@ -265,22 +240,27 @@ END
 
 							print "# $desc\n" if $debug;
 
-							my $rv = 'rval';
-							my $x = 'ov09'x($ocut/4+1);
+							my $rv = "x\000x";
+							my $x = chr(0)x($ocut+1);
 							my $mroot = {
 								# the length of this array should match the flag =~ /a/ array size of @key (above).
-								akey => [ '0', undef, 'a12', 19, [], {}, \'r9', scalar('ov02'x($ocut/4+1)), scalar('ov04'x($ocut/4+1)), [1,2,3] ],
-								hkey => { skey2 => 'sval2' },
-								skey => 'sval',
-								okey => 'over' x ($ocut/4 + 1),
-								rkey1 => \$rv,
-								rkey2 => \[4,5,6],
-								rkey3 => \{z=>'q'},
-#								rkey4 => \ (scalar('ov01'x($ocut/4+1))),
-#XXX								rkey4 => \$x,
-								eskey => '',
-								udkey => undef,
-								'0key' => '0',
+								'' => { skey2 => 'sval2' },
+								undef => "0 but true",
+								"0" => [ qw(
+									''
+									undef
+									"0\000"
+									"0"
+									chr(0)
+									"With\000inside"
+									"with\\back"
+									), '"0 but true"' ],
+								"0 but true" => \$rv,
+								"0\000" => \[ undef, "0", chr(0) ],
+								chr(0) => \{ chr(0) => undef},
+#								"With\000inside" => \ (scalar(chr(0)x($ocut+1))),
+#XXX								"with\\back" => \$x,
+#XXX								"witH\\back" => \$x,
 							};
 
 							$r1->{named_objects}{root} = clone($mroot);

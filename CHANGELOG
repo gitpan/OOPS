@@ -1,4 +1,30 @@
 
+2004/05/16 0.1002 - focus on: Pg bugfix and SQLite addtion
+
+Added support for SQLite. 
+
+Discovered that DBD::Pg doesn't handle ascii null without
+using bind_param().  Now bind_param() is used.
+
+Added more regression tests: null.t, bigblob.t
+
+Modified slowtest.t so we can skip to a specific test.
+
+Removed the requirement that a username be specified for DBI.
+
+The problem I had with SET TRANSACTION ISOLATION LEVEL in mysql
+turns out to be my mistake: it sets the level for the _next_
+transaction, not the current one.  The LOCK IN SHARE MODE hack
+has been removed.
+
+Added load_object() to the OOPS::FrontEnd to match the documentation
+on hand-written queries.  Also added dbh() to OOPS::FrontEnd to support
+hand-written queries.
+
+Added a quick check for schema version compatability.
+
+Minor changes to the license.
+
 2004/05/10 0.1001 - focus on: reliability
 
 Initial revision

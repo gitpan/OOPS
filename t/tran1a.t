@@ -24,6 +24,11 @@ use warnings;
 use diagnostics;
 use OOPS::TestCommon;
 
+if ($dbms eq 'sqlite') {
+	print "1..0 # Skipped: this test requires simultanous access\n";
+	exit;
+}
+
 use Test::MultiFork qw(stderr bail_on_bad_plan);
 import Test::MultiFork qw(colorize)
 	if -t STDOUT;
@@ -60,7 +65,6 @@ a:
 	resetall; 
 	$r1->{named_objects}{root} = {};
 	$r1->commit;
-	nocon;
 ab:
 	lockcommon();
 	$common = getcommon;
@@ -68,6 +72,7 @@ ab:
 	setcommon($common);
 	unlockcommon();
 a:
+	rcon;
 	eval {
 		rcon;
 		$r1->{named_objects}{root}{$pn} = $$;
@@ -75,8 +80,8 @@ a:
 	};
 	die $@ if $@;
 	$r1->DESTROY();
-	nocon;
 b:
+	rcon;
 	eval {
 		rcon;
 		$r1->{named_objects}{root}{$pn} = $$;
@@ -84,7 +89,6 @@ b:
 	};
 	die $@ if $@;
 	$r1->DESTROY();
-	nocon;
 ab:
 	rcon;
 	no warnings;
@@ -95,54 +99,45 @@ ab:
 	use warnings;
 	test($r1->{named_objects}{root}{$pn} && $r1->{named_objects}{root}{$pn} == $$);
 	$r1->DESTROY();
-	nocon;
 ab:
-	#
-	# Using $common{$process_name} to moderate, we loop until
-	# all processes have had a sucessful transaction
-	#
 	for(;;) {
-		my $try = 0;
+		my $try;
 		my $done = 1;
-		# print STDERR "# top of loop [$pn]\n" if $debug;
-ab:
 		rcon;
+ab:
 		eval {
 			$common = getcommon;
-			for my $names (keys %$common) {
-				next if $common->{$names};
-				$try = 1 if $names eq $pn;	# if we haven't done it yet
-				$done = 0;			# someone hasn't finished yet
+			for my $i (keys %$common) {
+				next if $common->{$i};
+				$done = 0;
+				$try = 1 if $i eq $pn;
 			}
 
 			if ($try) {
-				# print STDERR "# trying...  setting d -> x$$ [$pn]\n" if $debug;
 				$r1->{named_objects}{root}{d} = "x$$";
 				$r1->{named_objects}{root}{$pn} = "x$$";
 				$r1->commit;
 			}
 			$r1->DESTROY();
 		};
-		nocon;
 		last if $done;
 		if ($@) {
 			if ($@ =~ /$transfailrx/) {
-				# print STDERR "# locking failure, must try again [$pn]\n";
+				# normal failures, try again
 			} else {
 				print "\nBail out! -- $@\n" if $@ && $@ 
 			}
 		} elsif ($try) {
-			# print STDERR "# sucess! marking as done [$pn]\n" if $debug;
 			lockcommon();
 			$common = getcommon;
 			$common->{$pn} = 1;
 			setcommon($common);
 			unlockcommon();
 		} else {
-			print STDERR "# already done, waiting for peers [$pn]\n" if $debug;
+			print "# already done, waiting for peers\n";
 		}
 	}
-	nocon;
+	$r1->DESTROY();
 ab:
 	rcon;
 	my $r = $r1->{named_objects}{root};

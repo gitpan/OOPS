@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I.. -I.
+#!/home/muir/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -24,29 +24,27 @@ use warnings;
 use diagnostics;
 use OOPS::TestCommon;
 
+if ($dbms eq 'sqlite') {
+	print "1..0 # Skipped: this test requires simultanous access\n";
+	exit;
+}
+
+my $looplength = 1000;
+$OOPS::debug_dbidelay = 0;
+$debug = 0;
+
 BEGIN { $Test::MultiFork::inactivity = 60; }
 use Test::MultiFork qw(stderr bail_on_bad_plan);
 import Test::MultiFork qw(colorize)
 	if -t STDOUT;
 
-
-$debug = 0;
-
-#
-# This tests for transaction isolation levels.
-# READ COMMITTED and REPEATEABLE READ both fail
-# on this.
-#
-# With mysql, SERIALIZABLE doesn't tolerate more
-# than one OOPS active at the same time so we have
-# to be careful to clear out the inactive ones.
-#
+sub sum;
 
 FORK_ab:
 
 ab:
-
-my ($name,$pn,$number) = procname();
+my $pn = (procname())[1];
+srand($$);
 
 a:
 	my $to = 'jane';
@@ -54,44 +52,54 @@ b:
 	my $to = 'bob';
 
 ab:
-
-for my $x (0..200) {
+for my $x (0..$looplength) {
 a:
 	print "\n\n\n\n\n\n\n\n\n\n" if $debug;
 	resetall; 
-	$r1->{named_objects}{accounts} = {
+	%{$r1->{named_objects}} = (
 		joe => {
-			balance => 20,
+			coin1 => 25,
+			coin2 => 10,
 		},
 		jane => {
-			balance => 50,
+			coin3 => 5,
+			coin4 => 10,
 		},
 		bob => {
-			balance => 30,
+			coin5 => 50,
 		}
-	};
+	);
 	$r1->commit;
-	$r1->DESTROY;
-	nocon;
-	groupmangle('manygroups');
-ab:
 	rcon;
+	groupmangle('manygroups');
+	rcon;
+	my (@bal) = map(values %{$r1->{named_objects}{$_}}, qw(joe jane bob));
+	no warnings;
+	test(sum(@bal) == 100, "coins @bal");
+	use warnings;
+	$r1->DESTROY;
+
+ab:
+	if ($x > $looplength/2) {
+		$OOPS::debug_dbidelay = 1;
+	}
+	rcon;
+	my $x = int(rand($OOPS::debug_tdelay)); if ($OOPS::debug_tdelay && $OOPS::debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
 	eval {
-		my $joe = $r1->{named_objects}{accounts}{joe};
-		$joe->{balance} -= 20;
-		my $ato = $r1->{named_objects}{accounts}{$to};
-		$ato->{balance} += 20;
+		my $no = $r1->{named_objects};
+		$no->{$to}{coin1} = $no->{joe}{coin1};
+		delete $no->{joe}{coin1};
 		$r1->commit;
 	};
 	test(! $@ || $@ =~ /$transfailrx/, $@);
 	$r1->DESTROY;
-	nocon;
 b:
 	rcon;
-	my (@bal) = map($r1->{named_objects}{accounts}{$_}{balance}, qw(joe jane bob));
-	test($bal[0]+$bal[1]+$bal[2] == 100, "balances @bal");
+	my (@bal) = map(values %{$r1->{named_objects}{$_}}, qw(joe jane bob));
+	no warnings;
+	test(sum(@bal) == 100, "coins @bal");
+	use warnings;
 	$r1->DESTROY;
-	nocon;
 ab:
 }
 
@@ -100,5 +108,15 @@ $okay--;
 print "1..$okay\n";
 
 exit 0; # ----------------------------------------------------
+
+sub sum
+{
+	my $s = 0;
+	while (@_) {
+		my $x = shift;
+		$s += $x if defined $x;
+	}
+	return $s;
+}
 
 1;

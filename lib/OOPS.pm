@@ -1,8 +1,9 @@
 
 package OOPS;
 
-our $VERSION = 0.1001;
+our $VERSION = 0.1002;
 our $SCHEMA_VERSION = 1001;
+our $SCHEMA_WILL_BE_OKAY = 1009;
 
 require 5.008002;
 require Exporter;
@@ -133,7 +134,6 @@ sub new
 {
 	my ($pkg, %args) = @_;
 
-	my ($dbh, $dbms, $prefix) = OOPS->dbiconnect(%args);
 
 	my $oops = {
 		otype		=> {},	# object id -> H(ash)/A(rray)/S(scalar or ref)
@@ -168,149 +168,166 @@ sub new
 		loaded		=> 0,   # number of objects "in memory"
 		tountie		=> {},	# scalars wishing to be untied
 		class		=> {},  # my original class/blessing
-		queries		=> {},	# cache of queries - original text
-		dbh		=> $dbh,# DBI handle
+		queries		=> {},	# text of queries - original text
+		binary_q_list	=> {},	# list of binary parametes to queries - DBD::Pg only
 		commitdone	=> 0,	# have we already done a commit()?
-		id_pool_start	=> 0,	# next available value in object id pool
-		id_pool_end	=> 0,	# last available value in object id pool
 		refcopy		=> {},	# object id & pkey -> ref to orig pval
 		aliascount	=> {},	# object id & pkey -> count of \aliases
 		oldalias	=> {},	# object id -> [ object id, pkey ]
 		disassociated	=> {},  # object id & pkey && refs => other disconnected ref
-		table_prefix	=> $prefix, # prefix for dbms table names
+		args		=> \%args,  # creation arguments
 	};
 
+	print "# CREATE $$'s OOPS $oops\n" if $debug_oops_instances;
+
+	my ($dbh, $dbms, $prefix) = OOPS->dbiconnect(%args);
+
 	require "OOPS/$dbms.pm";
+
+	$oops->{dbh} 		= $dbh;
+	$oops->{table_prefix}	= $prefix; 
 	bless $oops, $pkg."::$dbms";
 	print "BLESSED $oops at ".__LINE__."\n" if $debug_blessing;
 
+	#
+	# object.otype:
+	#
+	#	H	HASH
+	#	A	ARRAY
+	#	S	SCALAR/REF
+	#
+	# object.virtual:
+	#
+	#	0	default
+	#	V	load virtual
+	#
+	# attribute.ptype:
+	#
+	#	0	normal
+	#	R	reference to an OBJECT
+	#	B	Big scalar
+	#
+	#
+
 	# must end in Q to match regex below
 	my $Q = $oops->initial_query_set . <<END;
-		saveobjectQ
+		saveobject: 3
 			INSERT INTO TP_object (id, loadgroup, class, otype, virtual, reftarg, rfe, alen, refs, counter)
 			VALUES (?, ?, ?, ?, ?, ?, '0', ?, ?, 1)
-		objectsetQ 
+		objectset:
 			SELECT g.* FROM TP_object AS g, TP_object AS og
 			WHERE og.id = ? AND og.loadgroup = g.loadgroup
-		objectgrouploadQ 
+		objectgroupload:
 			SELECT o.* FROM TP_attribute AS o, TP_object AS g
 			WHERE g.loadgroup = ? AND g.id = o.id
-		objectloadQ
+		objectload:
 			SELECT pkey, pval, ptype FROM TP_attribute
 			WHERE id = ?
-		objectreflistQ
+		objectreflist:
 			SELECT pval FROM TP_attribute
 			WHERE id = ? AND ptype = 'R'
-		objectinfoQ 
+		objectinfo:
 			SELECT loadgroup,class,otype,virtual,reftarg,alen,refs,counter FROM TP_object
 			WHERE id = ?
-		bigloadQ 
-			SELECT pval FROM TP_big 
-			WHERE id = ? AND pkey = ?
-		reftargobjectQ
+		reftargobject: 1
 			SELECT TP_object.id FROM TP_object, TP_attribute
 			WHERE TP_attribute.pkey = ?
 			AND TP_object.id = TP_attribute.id 
 			AND TP_object.otype = 'S'
-		reftargkeyQ
+		reftargkey: 1 2
 			SELECT TP_object.id FROM TP_object, TP_attribute
 			WHERE TP_attribute.pkey = ? 
 			AND TP_attribute.pval = ?
 			AND TP_object.id = TP_attribute.id 
 			AND TP_object.otype = 'S'
-		saveattributeQ 
+		saveattribute: 2 3
 			INSERT INTO TP_attribute 
 			VALUES (?, ?, ?, ?)
-		savebigQ
-			INSERT INTO TP_big 
-			VALUES (?, ?, ?)
-		clearobjQ
+		clearobj:
 			DELETE FROM TP_attribute WHERE id = ?;
 			DELETE FROM TP_big WHERE id = ?;
 			DELETE FROM TP_object WHERE id = ?;
-		loadpkeyQ
+		loadpkey: 2
 			SELECT pval, ptype FROM TP_attribute
 			WHERE id = ? AND pkey = ?
-		deleteattributeQ 
+		deleteattribute: 2
 			DELETE FROM TP_attribute
 			WHERE id = ? AND pkey = ?
-		savepkeyQ 
+		savepkey: 2 4 6 7
 			DELETE FROM TP_attribute
 			WHERE id = ? AND pkey = ?;
 			DELETE FROM TP_big
 			WHERE id = ? AND pkey = ?;
 			INSERT INTO TP_attribute
 			VALUES (?, ?, ?, ?);
-		updateattributeQ 
+		updateattribute: 1 4
 			UPDATE TP_attribute
 			SET pval = ?, ptype = ?
 			WHERE id = ? AND pkey = ?
-		updatebigQ 
-			UPDATE TP_big
-			SET pval = ?
-			WHERE id = ? AND pkey = ?
-		updateobjectQ
+		updateobject: 2
 			UPDATE TP_object
 			SET loadgroup = ?, class = ?, otype = ?, virtual = ?, reftarg = ?, alen = ?, refs = ?, counter = (counter + 1) % 65536
 			WHERE id = ?
-		deletebigQ
+		deletebig: 2
 			DELETE FROM TP_big
 			WHERE id = ? AND pkey = ?
-		predelete1Q
+		predelete1:
 			DELETE FROM TP_big WHERE id = ?
-		predelete2Q
+		predelete2:
 			DELETE FROM TP_attribute WHERE id = ? AND ptype != 'R'
-		postdeleteVQ
+		postdeleteV:
 			DELETE FROM TP_attribute
 			WHERE id = ?;
-		postdelete1Q
+		postdelete1:
 			DELETE FROM TP_attribute WHERE id = ?
-		postdelete2Q
+		postdelete2:
 			DELETE FROM TP_object WHERE id = ?
-		deleterangeQ
+		deleterange: 2
 			DELETE FROM TP_attribute
 			WHERE id = ? AND pkey >= ?
-		deleteoverrangeQ
+		deleteoverrange: 2
 			DELETE FROM TP_big
 			WHERE id = ? AND pkey >= ?
-		allocate_idQ
-			UPDATE TP_counters
-			SET cval = cval + ?
-			WHERE name = 'objectid'
-		get_idQ
-			SELECT cval 
-			FROM TP_counters
-			WHERE name = 'objectid'
 END
-	while ($Q =~ /\G\t\t([a-z]\w*)Q\s*\n/gc) {
-		my $qn = $1;
+	while ($Q =~ /\G\t\t([a-z]\w*):((?:\s+\d+)*)\s*\n/gc) {
+		my ($qn, $binary_list) = ($1, $2);
 		while ($Q =~ /\G\t\t\t(.*)\n/gc) {
 			$oops->{queries}{$qn} .= $1."\n";
 		}
+		$oops->{binary_q_list}{$qn} = $binary_list;
 	}
 
-	$oops->{counterdbh} = $oops->dbiconnect(%args);
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
 	$oops->initialize();
 	$oops->{named_objects} = $oops->load_virtual_object(1);
+
+	if ($oops->{arraylen}{1} != $SCHEMA_VERSION) {
+		die "version mismatch" unless 
+			$oops->{arraylen}{1} >= $SCHEMA_VERSION
+			&& $oops->{arraylen}{1} <= $SCHEMA_WILL_BE_OKAY;
+	}
+
 	$oopses++;
 	print "CREATE OOPS $oops [$oopses]\n" if $debug_free_tied;
 	$tiedvars{$oops} = longmess if $debug_tiedvars;
 	lock_keys(%$oops);
 	assertions($oops);
 
-	print "\n# CREATE $$'s OOPS $oops\n" if $debug_oops_instances;
 	return $oops if $args{no_front_end};
 	return OOPS::FrontEnd->new($oops);
 }
 
 sub dbiconnect
 {
-	my ($pkg, %args) = @_;
-	my $database = $args{dbi_dsn} || $args{DBI_DSN};
-	my $user = $args{user} || $args{USER};
-	my $password = $args{password} || $args{PASSWORD};
-	my $prefix = $args{table_prefix} || $args{TABLE_PREFIX} || $ENV{OOPS_PREFIX} || '';
+	my ($pkg, %a) = @_;
+	my $args = \%a;
+	if (ref($pkg) && ! %a) {
+		$args = $pkg->{args};
+	}
+	my $database = $args->{dbi_dsn} || $args->{DBI_DSN};
+	my $user = $args->{user} || $args->{USER};
+	my $password = $args->{password} || $args->{PASSWORD};
+	my $prefix = $args->{table_prefix} || $args->{TABLE_PREFIX} || $ENV{OOPS_PREFIX} || '';
 	if (! defined($database)) {
 		if (defined($ENV{OOPS_DSN})) {
 			$database = $ENV{OOPS_DSN};
@@ -325,16 +342,16 @@ sub dbiconnect
 		}
 	}
 	die "no database specified" unless $database;
-	die "only mysql & postgres supported" unless $database =~ /^dbi:(mysql|pg)\b/i;
+	die "only mysql, postgres & sqlite supported" unless $database =~ /^dbi:(mysql|pg|sqlite)\b/i;
 	my $dbms = "\L$1";
 	$user = $user || $ENV{OOPS_USER} || $ENV{DBI_USER};
-	die "no user specified" unless $user;
 	$password = $password || $ENV{OOPS_PASS} || $ENV{DBI_PASS};
 	my $dbh = DBI->connect($database, $user, $password, {
 		Taint => 0,
 		PrintError => 0,
 		RaiseError => 0,
-		AutoCommit => 0}) or die "connect to database: $DBI::errstr";
+		AutoCommit => 0,
+		}) or confess "connect to database: $DBI::errstr";
 	$dbh->trace($debug_dbi) if $debug_dbi;
 	return ($dbh, $dbms, $prefix) if wantarray;
 	return $dbh;
@@ -345,45 +362,25 @@ sub initial_setup
 	my ($pkg, %args) = @_;
 
 	my ($dbh, $dbms) = OOPS->dbiconnect(%args);
+	$dbh->disconnect;
 	require "OOPS/$dbms.pm";
 
 	# create tables, initial objects, etc.
 	no strict 'refs';
-
-	db_domany($pkg, \%args, <<END . &{"OOPS::$dbms"."::tabledefs"}() . db_initial_values());
-		-DROP TABLE TP_object;
-		-DROP TABLE TP_attribute;
-		-DROP TABLE TP_big;
-		-DROP TABLE TP_counters;
-END
-	
-	$dbh->disconnect;
+	my $x;
+	for my $t (&{"OOPS::${dbms}::table_list"}()) {
+		$x .= "-DROP TABLE $t;\n";
+	}
+	db_domany($pkg, \%args, 
+		$x 
+		. &{"OOPS::${dbms}::tabledefs"}() 
+		. db_initial_values() 
+		. &{"OOPS::${dbms}::db_initial_values"}());
+	return $dbms;
 }
 
 sub db_initial_values
 {
-	#
-	# object types:
-	#
-	#	H	HASH
-	#	A	ARRAY
-	#	S	SCALAR/REF
-	#
-	# virtual values:
-	#
-	#	0	default
-	#	V	load virtual
-	#
-	# attribute types:
-	#
-	#	0	normal
-	#	R	reference to an OBJECT
-	#	B	Big scalar
-	#
-	# alen:		array length
-	#
-	#
-
 	return <<END;
 	INSERT INTO TP_object values (1, 1, 'HASH', 'H', 'V', '0', '0', $SCHEMA_VERSION, 1, 1);
 	INSERT INTO TP_attribute values (2, 'user objects', '1', 'R');
@@ -395,9 +392,6 @@ sub db_initial_values
 
 	INSERT INTO TP_object values (3, 3, 'HASH', 'H', 'V', '0', '0', 0, 1, 1);
 	INSERT INTO TP_attribute values (2, 'counters', '3', 'R');
-
-	INSERT INTO TP_counters values ('objectid', 101);
-
 END
 }
 
@@ -405,6 +399,7 @@ sub db_domany
 {
 	my ($pkg, $connectargs, $x) = @_;
 	my ($dbh, $dbms, $prefix) = OOPS->dbiconnect(%$connectargs);
+	local($@);
 	while ($x =~ /\G\s*(\S.*?);\n/sg) {
 		my $stmt = $1;
 		$stmt =~ s/TP_/$prefix/g;
@@ -417,6 +412,7 @@ sub db_domany
 			};
 		} else {
 			eval { $dbh->do($stmt) } || die "<<$stmt>>".$dbh->errstr;
+			die $@ if $@;
 		}
 	}
 	$dbh->commit;
@@ -775,6 +771,7 @@ sub transaction
 	my @r;
 	my $tries = 0;
 	my $die = 0;
+	local($@);
 	for (;;) {
 		die if $die; # protect aginst 'next' et all inside eval
 		$die = 1; 
@@ -827,6 +824,7 @@ sub commit
 	my $oops = shift;
 	$oops->save;
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
+	local($@);
 	eval { $oops->{dbh}->commit } || die $oops->{dbh}->errstr;
 	confess $@ if $@;
 	print "COMMIT $oops done\n" if $debug_commit;
@@ -1019,6 +1017,7 @@ sub save
 	# allows a less strict tranaction locking default.
 	# 
 	#
+	local($@);
 	for my $id (keys %$forcesave) {
 		next if $done{$id} && $forcesave->{$id} == 1;
 		my $type = $type->{$id} || die;
@@ -1650,21 +1649,17 @@ sub update_attribute
 
 	$atval = '0' if defined($atval) && $atval eq '0';  # make sure it's a string
 
-	my $updateattributeQ = $oops->query('updateattribute');
-	$updateattributeQ->execute($atval, $ptype, $id, $pkey) || die $updateattributeQ->errstr." ";
+	my $updateattributeQ = $oops->query('updateattribute', execute => [ $atval, $ptype, $id, $pkey ]);
 	if ($oldover && $newover) {
-		my $updatebigQ = $oops->query('updatebig');
-		$updatebigQ->execute($_[0], $id, $pkey) || die;
+		$oops->update_big($id, $pkey, $_[0]);
 		$oops->{oldbig}{$id}{$pkey} = $atval;
 		delete $oops->{oldvalue}{$id}{$pkey}
 			if exists $oops->{oldvalue}{$id} && exists $oops->{oldvalue}{$id}{$pkey};
 	} elsif ($oldover) {
-		my $deletebigQ = $oops->query('deletebig');
-		$deletebigQ->execute($id, $pkey) || die;
+		my $deletebigQ = $oops->query('deletebig', execute => [ $id, $pkey ]);
 		$oops->{oldvalue}{$id}{$pkey} = $atval;
 	} elsif ($newover) {
-		my $savebigQ = $oops->query('savebig');
-		$savebigQ->execute($id, $pkey, $_[0]) || die;
+		$oops->save_big($id, $pkey, $_[0]);
 		$oops->{oldbig}{$id}{$pkey} = $atval;
 		delete $oops->{oldvalue}{$id}{$pkey}
 			if exists $oops->{oldvalue}{$id} && exists $oops->{oldvalue}{$id}{$pkey};
@@ -1694,8 +1689,7 @@ sub prepare_insert_attribute
 		$ptype = 'B';
 		$oops->{oldbig}{$id}{$pkey} = $atval;
 		print "*$id/$pkey is an big value\n" if $debug_save_attr_arraylen;
-		my $savebigQ = $oops->query('savebig');
-		$savebigQ->execute($id, $pkey, $_[0]) || die;
+		$oops->save_big($id, $pkey, $_[0]);
 	} elsif (ref($_[0])) {
 		$atval = $oops->get_object_id($_[0]);
 		print "*$id/$pkey is a reference to *$atval\n" if $debug_save_attr_arraylen;
@@ -1727,13 +1721,11 @@ sub insert_attribute
 	my $sym = $typesymbol{reftype($oops->{cache}{$id})} if $debug_writes;
 	print "$sym$id/$pkey insert_attribute $qval{$atval} (ptype $ptype)\n" if $debug_writes;
 	$atval = '' if defined($atval) && $atval eq '';   # why does this line help?!?
-	my $saveattributeQ = $oops->query('saveattribute');
-	eval { $saveattributeQ->execute($id, $pkey, $atval, $ptype) } || die $saveattributeQ->errstr ;
-	confess $@ if $@;
+	my $saveattributeQ = $oops->query('saveattribute', execute => [ $id, $pkey, $atval, $ptype ]);
 	$oops->{forcesave}{$id} = 1
 		if $oops->{do_forcesave};
 	no warnings;
-	print "*$id/$pkey - '$atval'/$ptype inserted\n" if $debug_save_attributes;
+	print "*$id/$qval{$pkey} - '$atval'/$ptype inserted\n" if $debug_save_attributes;
 	assertions($oops);
 }
 
@@ -1749,8 +1741,7 @@ sub delete_attribute
 	my $oldvalue = shift;
 	my $oldover = exists $oops->{oldbig}{$id} && exists $oops->{oldbig}{$id}{$pkey};
 	$pkey = '0' if $pkey eq '0';  # make sure it's a string
-	my $deleteattributeQ = $oops->query('deleteattribute');
-	$deleteattributeQ->execute($id, $pkey) || die;
+	my $deleteattributeQ = $oops->query('deleteattribute', execute => [ $id, $pkey ]);
 	if (ref($oldvalue)) {
 		my $oldid = $oops->get_object_id($oldvalue);
 		$oops->{refchange}{$oldid} -= 1;
@@ -1764,8 +1755,7 @@ sub delete_attribute
 		delete $oops->{oldobject}{$id}{$pkey};
 	}
 	if ($oldover) {
-		my $deletebigQ = $oops->query('deletebig');
-		$deletebigQ->execute($id, $pkey) || die;
+		my $deletebigQ = $oops->query('deletebig', execute => [ $id, $pkey ]);
 		delete $oops->{oldbig}{$id}{$pkey};
 	}
 	print "*$id/$pkey - delete'\n" if $debug_save_attributes;
@@ -1793,21 +1783,7 @@ sub get_object_id
 	
 	print Carp::longmess("DEBUG: get_object_id($obj) called ") if $debug_getobid_context;
 
-	my $id;
-	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
-		$id = $oops->{id_pool_start}++;
-		print "in get_object_id, allocating $id from pool for $obj\n" if $debug_object_id;
-	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $id_alloc_size);
-		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
-		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
-		$get_idQ->finish;
-		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$id_alloc_size;
-		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in get_object_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $debug_object_id;
-		print "in get_object_id, allocated $id from before pool for $obj\n" if $debug_object_id;
-	}
+	my $id = $oops->allocate_id();
 
 	#
 	# XXX this ends up needing a double-save.  If we guess correctly
@@ -1815,6 +1791,8 @@ sub get_object_id
 	#
 	my $saveobjectQ = $oops->query('saveobject');
 	$saveobjectQ->execute($id, $id, "will be".ref($obj), '?', '?', '?', 0, -9999) || die $saveobjectQ->errstr;
+
+	$id = $oops->post_new_object($id);
 
 	# $mem = refaddr(\$obj) if $bt eq 'SCALAR';
 	$oops->memory($obj, $id);
@@ -1918,6 +1896,35 @@ sub predelete_object
 	assertions($oops);
 }
 
+sub load_big
+{
+	my ($oops, $id, $pkey) = @_;
+	my $bigloadQ = $oops->query('bigload', execute => [ $id, $pkey ]);
+	my ($val) = $bigloadQ->fetchrow_array();
+	$bigloadQ->finish();
+	confess "null big *$id/'$pkey'" if ! defined($val) || $val eq '';
+	assertions($oops);
+	return $val;
+}
+
+sub save_big
+{
+	my $oops = shift;
+	my $id = shift;
+	my $pkey = shift;
+	my $savebigQ = $oops->query('savebig');
+	$savebigQ->execute($id, $pkey, $_[0]) || die;
+}
+
+sub update_big
+{
+	my $oops = shift;
+	my $id = shift;
+	my $pkey = shift;
+	my $updatebigQ = $oops->query('updatebig');
+	$updatebigQ->execute($_[0], $id, $pkey) || die $updatebigQ->errstr;
+}
+
 sub query
 {
 	my ($oops, $q, %args) = @_;
@@ -1926,6 +1933,7 @@ sub query
 	confess unless $query = $oops->{queries}{$q};
 	$query =~ s/TP_/$oops->{table_prefix}/g;
 
+	local($@);
 	my $dbh = $args{dbh} || $oops->{dbh};
 	my $sth = eval { $dbh->prepare_cached($query, undef, 3) } || die $dbh->errstr;
 	die $@ if $@;
@@ -1942,18 +1950,6 @@ sub query
 
 	assertions($oops);
 	return $sth;
-}
-
-sub load_big
-{
-	my ($oops, $id, $pkey) = @_;
-	my $bigloadQ = $oops->query('bigload');
-	$bigloadQ->execute($id, $pkey) || die $bigloadQ->errstr()." ";
-	my ($val) = $bigloadQ->fetchrow_array();
-	$bigloadQ->finish();
-	confess "null big *$id/'$pkey'" if ! defined($val) || $val eq '';
-	assertions($oops);
-	return $val;
 }
 
 sub workaround27555
@@ -2041,7 +2037,7 @@ sub DESTROY
 	local($main::SIG{'__DIE__'}) = \&die_from_destroy;
 	print "OOPS::DESTROY called\n" if $debug_free_tied;
 	my $oops = shift;
-	print "\n# DESTROY $$'s OOPS $oops\n" if $debug_oops_instances;
+	print "# DESTROY $$'s OOPS $oops\n" if $debug_oops_instances && $oops->{dbh};
 #print STDERR "self = $oops\n";
 	my $cache = $oops->{cache} || {};
 	for my $id (keys %$cache) {
@@ -2064,8 +2060,10 @@ sub DESTROY
 		print "Calling *$id->destroy $qval{$tied}\n" if $debug_free_tied;
 		$tied->destroy;
 	}
-	eval { $oops->{dbh}->disconnect() if $oops->{dbh} };
-	eval { $oops->{counterdbh}->disconnect() if $oops->{counterdbh} };
+	local($@);
+	eval { $oops->{dbh}->disconnect() } if $oops->{dbh};
+	die $@ if $@;
+	$oops->byebye;
 	%$oops = ();
 	$oopses--;
 	assertions($oops);
@@ -2973,8 +2971,6 @@ sub tied_hash_reference
 			$self->LOAD_SELF_REF() if $oops->{reftarg}{$id};
 		} elsif (%$dcache || %$wcache) {
 			my %done;
-			my $deletebigQ = $oops->query('deletebig');
-			my $loadpkeyQ = $oops->query('loadpkey');
 			for my $pkey (keys %$dcache, keys %$wcache) {
 				no warnings qw(uninitialized);
 				die if $done{$pkey}++;
@@ -2987,12 +2983,13 @@ sub tied_hash_reference
 					next;
 				} else {
 					print "%$id/'$pkey' - checking old pval in virtual SAVE_SELF\n" if $debug_virtual_delete || $debug_virtual_save;
-					$loadpkeyQ->execute($id, $pkey) || die;
+					my $loadpkeyQ = $oops->query('loadpkey', execute => [ $id, $pkey ]);
 					if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
 						$ovcache->{$pkey} = [ $pval, $ptype ];
 					} else {
 						# no old value
 					}
+					$loadpkeyQ->finish();
 				}
 				if (! $ptype) {
 					# nothing
@@ -3001,26 +2998,24 @@ sub tied_hash_reference
 					$oops->{refchange}{$pval} -= 1;
 					print "in demandhash save-self, V%$id reference to $oops->{otype}{$pval}*$pval gone (-1)\n" if $debug_refcount;
 				} elsif ($ptype eq 'B') {
-					 print "%$id/'$pkey' - old value was big\n" if $debug_virtual_delete || $debug_virtual_save; 
-					$deletebigQ->execute($id, $pkey) || die;
+					print "%$id/'$pkey' - old value was big\n" if $debug_virtual_delete || $debug_virtual_save; 
+					$oops->query('deletebig', execute => [ $id, $pkey ]);
 				} else {
 					die;
 				}
 				$self->LOAD_SELF_REF($pkey) if exists $dcache->{$pkey} && $oops->{reftarg}{$id};
 			}
-			$loadpkeyQ->finish();
 		}
 		if (%$dcache && ! $vars->{alldelete}) {
-			my $deleteattributeQ = $oops->query('deleteattribute');
 			for my $pkey (keys %$dcache) {
 				no warnings qw(uninitialized);
 				print "%$id/'$pkey' - commit virtual delete (SAVE_SELF)\n" if $debug_virtual_delete || $debug_virtual_save;
-				$deleteattributeQ->execute($id, $pkey) || die;
+				$oops->query('deleteattribute', execute => [ $id, $pkey ]);
 			}
 		}
 		if (%$wcache) {
 			my $saveattributeQ = $oops->query('saveattribute');
-			my $updateattributeQ = $oops->query('updateattribute');
+			local($@);
 			for my $pkey (keys %$wcache) {
 				no warnings qw(uninitialized);
 #				print "%$id/'$pkey' - no change in value\n" if $debug_virtual_save && exists $rcache->{$pkey} && $rcache->{$pkey} eq $wcache->{$pkey} && defined($rcache->{$pkey}) eq defined($wcache->{$pkey}) && ref($rcache->{$pkey}) eq ref($wcache->{$pkey});
@@ -3032,13 +3027,11 @@ sub tied_hash_reference
 					my ($atval, $ptype) = $oops->prepare_insert_attribute($id, $pkey, $wcache->{$pkey}, undef);
 #print "pkey=$pkey atval=$atval\n";
 					print "%$id/'$pkey' - replacement value ('$atval', $ptype [was @{$ovcache->{$pkey}}])\n" if $debug_virtual_save;
-					eval { $updateattributeQ->execute($atval, $ptype, $id, $pkey) } || die $updateattributeQ->errstr;
-					die $@ if $@;
+					$oops->query('updateattribute', execute => [ $atval, $ptype, $id, $pkey ]);
 				} else {
 					my ($atval, $ptype) = $oops->prepare_insert_attribute($id, $pkey, $wcache->{$pkey}, undef);
 					print "%$id/'$pkey' - new value ('$atval', $ptype)\n" if $debug_virtual_save;
-					eval { $saveattributeQ->execute($id, $pkey, $atval, $ptype) } || die $saveattributeQ->errstr;
-					die $@ if $@;
+					$oops->query('saveattribute', execute => [ $id, $pkey, $atval, $ptype ]);
 				}
 				$vars->{new_rcache}{$pkey} = $wcache->{$pkey};
 			}
@@ -3155,8 +3148,7 @@ sub tied_hash_reference
 		print "%*$id/'$pkey' vEXISTS: 0 - alldelete\n" if $debug_virtual_hash && $vars->{alldelete};
 		return 0 if $vars->{alldelete};
 		my ($pval, $ptype);
-		my $loadpkeyQ = $oops->query('loadpkey');
-		$loadpkeyQ->execute($id, $pkey) || die;
+		my $loadpkeyQ = $oops->query('loadpkey', execute => [ $id, $pkey ]);
 		if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
 			if ($ptype) {
 				$ovcache->{$pkey} = [ $pval, $ptype ];
@@ -3185,8 +3177,7 @@ sub tied_hash_reference
 			return @{$ovcache->{$pkey}};
 		} else {
 			my ($pval, $ptype);
-			my $loadpkeyQ = $oops->query('loadpkey');
-			$loadpkeyQ->execute($id, $pkey) || confess $oops->{dbh}->errstr;
+			my $loadpkeyQ = $oops->query('loadpkey', execute => [ $id, $pkey ]);
 			my $found = ($pval, $ptype) = $loadpkeyQ->fetchrow_array;
 			$loadpkeyQ->finish();
 			print "%$id/$pkey vORIGINAL_PTYPE none found\n" if $debug_virtual_ovals && ! $found;
@@ -3208,10 +3199,7 @@ sub tied_hash_reference
 			die if defined $pval;
 		} elsif ($ptype eq 'B') {
 			print "%*$id/'$pkey' is big\n" if $debug_virtual_hash;
-			my $bigloadQ = $oops->query('bigload');
-			$bigloadQ->execute($id, $pkey) || confess $bigloadQ->errstr()." ";
-			($pval) = $bigloadQ->fetchrow_array;
-			$bigloadQ->finish();
+			$pval = $oops->load_big($id, $pkey);
 		} elsif ($ptype eq 'R') {
 			my $ov = $pval if $debug_virtual_hash;
 			$pval = $oops->load_object($pval);
@@ -3569,6 +3557,8 @@ sub tied_hash_reference
 	sub commit		{ my $self = shift; my $tied = tied %$self; $tied->[0]->commit(@_); }
 	sub virtual_object	{ my $self = shift; my $tied = tied %$self; $tied->[0]->virtual_object(@_); }
 	sub workaround27555	{ my $self = shift; my $tied = tied %$self; $tied->[0]->workaround27555(@_); }
+	sub load_object		{ my $self = shift; my $tied = tied %$self; local($@); eval { $tied->[0]->load_object(@_); } } 
+	sub dbh			{ my $self = shift; my $tied = tied %$self; $tied->[0]->{dbh} }
 
 }
 
@@ -3621,6 +3611,12 @@ sub OOPS::debug::FETCH { my $f = shift; return &$f(shift) }
 __END__
 
 TODO:
+
+remove $oops->{loaded}?
+
+fix the NOT NULL issue in mysql
+
+test the schema version
 
 TEST:
 
