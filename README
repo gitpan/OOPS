@@ -108,22 +108,14 @@ SUPPORTED PLATFORMS
     mysql          OOPS has been tested with mysql 4.0.16 and 4.0.18 using
                    InnoDB tables.
 
-    SQLite         OOPS has been tested with DBD::SQLite 0.31. With SQLite,
-                   an additional parameter to "OOPS->new()" is recognized:
-                   "default_synchronous". Possible values are:
-
-                   FULL    Sync() all transactions to disk before returning.
-
-                   NORMAL  The default: sync() at critical moments only -
-                           protects against program failure, but not all
-                           power or OS failures.
-
-                   OFF     Don't sync() at all and go really fast.
+    SQLite         OOPS has been tested with DBD::SQLite 0.31.
 
                    SQLite is not 8-bit clean with respect to "\0". OOPS uses
                    a DBD::SQLite feature to translate binary nulls. A
                    side-effect is that backslash will be doubled "\" ->
                    "\\". OOPS does not use the "counters" table with SQLite.
+
+                   <http://www.hwaci.com/sw/sqlite/>
 
     Perl versions 5.8.2 through 5.8.4 are supported. Prior to 5.8.2, it
     wasn't possible to untie scalars from within the a tied scalar access
@@ -164,6 +156,27 @@ FUNCTIONS
         exceptions that "transaction()" catches. To do this, you can regex
         match $@ against $OOPS::transfailrx.
 
+        Basically, transaction is a slightly fancier version of the
+        following:
+
+         sub transaction
+         {
+                my ($sub, @args) = @_;
+                for (0..15) {
+                        eval {
+                                &$sub(@args);
+                        }
+                        last unless $@;
+                        next if $@ =~ /$transfailrx/;
+                        die $@;
+                }
+         }
+
+        The important thing to notice is that your code will be called over
+        and over until the transaction suceeeds. This means you should write
+        your code so that it doesn't have any external side effects until
+        after it calls commit().
+
     "getref(%hash, $key)"
         References to tied hash keys are buggy in all perls through 5.8.3.
         Use getref(%hash, $key) to create your reference to a tied hash key.
@@ -179,25 +192,75 @@ FUNCTIONS
         unexpected and inconsistent results.
 
 PUBLIC CLASS METHODS
-    "OOPS->new(dbi_dsn => $dbi_dsn, user => $user, password => $password,
-    table_prefix => $prefix)"
-        Creates a OOPS object instance. In addition to the normal DBI
-        default environment variables of $DBI_DSN, $DBI_DRIVER, $DBI_USER,
-        $DBI_PASS, OOPS has its own set that overrides the DBI_ set:
-        $OOPS_DSN, $OOPS_DRIVER, $OOPS_USER, $OOPS_PASS.
+    "OOPS->new(%parameters)"
+        Creates a OOPS object instance. More than one object instance is
+        allowed at the same time. Instances are unaware of each other.
+        Making a reference from a persistent object in one instance to a
+        persistent object in another instance will cause recursive copying
+        from one instance to the other.
 
+        The %parameters are documented in the next section.
+
+    "OOPS->initial_setup(%parameters)"
+        Drops and recreates the database tables. Don't use it too often :-)
+        The regression suite drops and re-creates the tables many times. Be
+        careful.
+
+        The %parameters are documented in the next section.
+
+PARAMETERS FOR NEW
+    The "new()" and "initial_setup()" methods take a hash specification for
+    their behavior. Here are the parameters allowed:
+
+    "dbi_dsn" / $ENV{OOPS_DSN} / $ENV{OOPS_DRIVER} / $ENV{DBI_DSN} /
+    "$ENV{DBI_DRIVER"
+        Many ways to specify the DSN for DBI: as an argument; as an OOPS
+        environment variable; as a DBI environment variable. Use at least
+        one :-) See the DBI documentation for more details.
+
+    "user" / $ENV{OOPS_USER} / $ENV{DBI_USER}
+        Three ways to specify the user for DBI: as an argument; as an OOPS
+        environment variable; as a DBI environment variable. Not required
+        for all databases.
+
+    "password" / $ENV{OOPS_PASS} / $ENV{DBI_PASS}
+        Three ways to specify the password for DBI: as an argument; as an
+        OOPS environment variable; as a DBI environment variable. Not
+        required for all databases.
+
+    "table_prefix" / $ENV{OOPS_PREFIX}
         OOPS allows a prefix to be supplied for it's internal table names.
         If you set a prefix of "FOO_" then it will use a "FOO_object" table
         instead of an "object" table. This can be set as an argument to
         "new()" or it can be set with the environment variable $OOPS_PREFIX.
         This allows multiple separate object spaces to exist within the same
-        SQL database. It's intended use is to support testing.
+        SQL database. It's intended use is to support testing vs. production
+        environments.
 
-    "OOPS->inital_setup(dbi_dsn => $dbi_dsn, user => $user, password =>
-    $password, table_prefix => $prefix)"
-        Drops and recreates the database tables. Don't use it too often :-)
-        The regression suite drops and re-creates the tables many times. Be
-        careful.
+    "auto_upgrade" / $ENV{OOPS_UPGRADE}
+        The relational schema for OOPS is not same for all versions of OOPS.
+        If this is set, then an older schema will be upgraded to the current
+        schema. If this is not set, then OOPS will use the older schema
+        unchanged. In most cases, this means that OOPS will use a historical
+        version of itself rather than the current version. See the SCHEMA
+        VERSIONS section of this document.
+
+    "auto_initialize" / $ENV{OOPS_INIT}
+        The DBMS must be initialized before it can be used: tables created,
+        a few rows inserted, etc. This can be handled by calling
+        "initial_setup()" or it can be handled automatically by "new()" if
+        "auto_initialize" or $OOPS_AUTO_INIT is set.
+
+    "default_synchronous" / $ENV{OOPS_SYNC}
+        With SQLite, an additional parameter to "OOPS->new()" is recognized:
+        "default_synchronous". Possible values are:
+
+        FULL    Sync() all transactions to disk before returning.
+
+        NORMAL  The default: sync() at critical moments only - protects
+                against program failure, but not all power or OS failures.
+
+        OFF     Don't sync() at all and go really fast.
 
 PUBLIC OBJECT METHODS
     "->commit()"
@@ -347,6 +410,19 @@ ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
         beyond generating lots of output to STDERR. The default perl
         configuration on FreeBSD uses perl's "malloc()".
 
+SCHEMA VERSIONS
+    As OOPS is developed, the schema that OOPS uses changes. At the current
+    time, all versions of OOPS use forward and backwards compatable (though
+    not identical) schemas.
+
+    OOPS notices if the version of the schema in the DBMS is different than
+    the version the code currently supports. When this happens there are two
+    possibilities: either OOPS will upgrade the schema to the current
+    version or it will use an older version of OOPS to access the data.
+
+    This behavior allows the OOPS module to be upgraded without distrupting
+    installed applications.
+
 FUTURE DIRECTIONS
     OOPS isn't done. There are a bunch of things that I am considering
     adding to it. If any of these things is important to you, speak up so
@@ -428,6 +504,10 @@ FUTURE DIRECTIONS
         Right now, just HASH, SCALAR, REF, and ARRAY are supported. Regular
         expressions, file handles, I don't know it's possible to support
         code references.
+
+    on-line data migration
+        By doing double updates, OOPS could support live migration from one
+        DBMS to another.
 
 WRITING SQL QUERIES BY HAND
     If you want to query your data, then until a translator is written, your
@@ -688,6 +768,10 @@ THE COMPETITION
 
     Tangram
         Must define schmea. RDBMS schema is created from perl schema.
+
+    DBM::Deep
+        DBM::Deep handles deep and cross-linked data. It does not have
+        support for queries or transactions.
 
     Pixie
         Less trasnparent. Requires user to remember a cookie to retreive

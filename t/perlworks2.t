@@ -8,7 +8,7 @@ use strict;
 #
 
 use Scalar::Util qw(refaddr reftype blessed);
-use Test::More tests => 82;
+use Test::More tests => 84;
 
 #
 # I can't find a case where a delete doesn't
@@ -578,6 +578,57 @@ print "# block at ".__LINE__."\n";
 	$b->{z} = 11;
 	ok($b->{z} == 12);
 }
+
+
+#
+# Why does local($@) hide the active return?
+# bug #29696
+#
+
+print "# block at ".__LINE__."\n";
+{
+	sub x9 {
+		local($@);
+		eval { &y9(); };
+		TODO: {
+			local $TODO = 'local($@) is hiding the exception return';
+			ok($@ eq 'foo4:foo2');
+		}
+	}
+	sub y9 {
+		&z9();
+	}
+	sub z9 {
+		local($@);
+		my $x;
+		eval { $x = 7 };
+		eval { $x = 'foo2'; die "foo3\n" } || die "foo4:$x\n";
+		die $@ if $@;
+	}
+	&x9();
+}
+
+print "# block at ".__LINE__."\n";
+{
+	sub x19 {
+		eval { &y19(); };
+		TODO: {
+			local $TODO = 'nested evals are hiding the exception return';
+			ok($@ eq 'foo4:foo2');
+		}
+	}
+	sub y19 {
+		&z19();
+	}
+	sub z19 {
+		my $x;
+		eval { $x = 7 };
+		eval { $x = 'foo2'; die "foo3\n" } || die "foo4:$x\n";
+		die $@ if $@;
+	}
+	&x9();
+}
+
 
 
 {

@@ -121,31 +121,14 @@ OOPS has been tested with mysql 4.0.16 and 4.0.18 using InnoDB tables.
 
 =item SQLite
 
-OOPS has been tested with DBD::SQLite 0.31.  With SQLite, an additional
-parameter to C<OOPS-E<gt>new()> is recognized: C<default_synchronous>.
-Possible values are:
-
-=over 8
-
-=item FULL
-
-Sync() all transactions to disk before returning.
-
-=item NORMAL
-
-The default: sync() at critical moments only - protects against program
-failure, but not all power or OS failures.
-
-=item OFF
-
-Don't sync() at all and go really fast.
-
-=back
+OOPS has been tested with DBD::SQLite 0.31.  
 
 SQLite is not 8-bit clean with respect to C<\0>.  OOPS uses a DBD::SQLite
 feature to translate binary nulls.  A side-effect is that backslash
 will be doubled C<\> -> C<\\>.  OOPS does not use the C<counters> table
 with SQLite.
+
+L<http://www.hwaci.com/sw/sqlite/>
 
 =back
 
@@ -173,8 +156,8 @@ The RDBMS schema for SQLite is different than for mysql or PostgreSQL
 =item C<transaction($funcref, @args)>
 
 C<transaction()> is a wrapper for a complete transaction.   Transactions
-that fail due to deadlock with other processes will be re-run 
-automatically.
+that fail due to deadlock with other processes will be re-run
+automatically.  
 
 The first parameter is a reference to a function.  Any additional
 parameters will be passed as parameters to that function.  The return
@@ -189,6 +172,25 @@ C<$OOPS::transaction_maxtries> times (15 times unless you change it).
 If you don't use C<transaction()> you might want to catch the exceptions
 that C<transaction()> catches.  To do this, you can regex match C<$@>
 against C<$OOPS::transfailrx>.
+
+Basically, transaction is a slightly fancier version of the following:
+
+ sub transaction
+ {
+	my ($sub, @args) = @_;
+	for (0..15) {
+		eval {
+			&$sub(@args);
+		}
+		last unless $@;
+		next if $@ =~ /$transfailrx/;
+		die $@;
+	}
+ }
+
+The important thing to notice is that your code will be called over and over
+until the transaction suceeeds.  This means you should write your code so that
+it doesn't have any external side effects until after it calls commit().
 
 =item C<getref(%hash, $key)>
 
@@ -212,24 +214,94 @@ in unexpected and inconsistent results.
 
 =over 4
 
-=item C<OOPS-E<gt>new(dbi_dsn =E<gt> $dbi_dsn, user =E<gt> $user, password =E<gt> $password, table_prefix =E<gt> $prefix)>
+=item C<OOPS-E<gt>new(%parameters)>
 
-Creates a OOPS object instance.   In addition to the normal DBI default
-environment variables of C<$DBI_DSN>, C<$DBI_DRIVER>, C<$DBI_USER>,
-C<$DBI_PASS>, OOPS has its own set that overrides the DBI_ set:
-C<$OOPS_DSN>, C<$OOPS_DRIVER>, C<$OOPS_USER>, C<$OOPS_PASS>.
+Creates a OOPS object instance.  More than one object instance is allowed at 
+the same time.  Instances are unaware of each other.  Making a reference from
+a persistent object in one instance to a persistent object in another instance
+will cause recursive copying from one instance to the other.
+
+The C<%parameters> are documented in the next section.
+
+=item C<OOPS-E<gt>initial_setup(%parameters)>
+
+Drops and recreates the database tables.  Don't use it too often :-)
+The regression suite drops and re-creates the tables many times.  Be careful.
+
+The C<%parameters> are documented in the next section.
+
+=back
+
+=head1 PARAMETERS FOR NEW
+
+The C<new()> and C<initial_setup()> methods take a hash specification
+for their behavior.  Here are the parameters allowed:
+
+=over 4
+
+=item C<dbi_dsn> / C<$ENV{OOPS_DSN}> / C<$ENV{OOPS_DRIVER}> / C<$ENV{DBI_DSN}> / C<$ENV{DBI_DRIVER>
+
+Many ways to specify the DSN for DBI: as an argument; as an
+OOPS environment variable; as a DBI environment variable.  Use
+at least one :-)  See the DBI documentation for more details.
+
+=item C<user> / C<$ENV{OOPS_USER}> / C<$ENV{DBI_USER}>
+
+Three ways to specify the user for DBI: as an argument; as an
+OOPS environment variable; as a DBI environment variable.  Not
+required for all databases.
+
+=item C<password> / C<$ENV{OOPS_PASS}> / C<$ENV{DBI_PASS}>
+
+Three ways to specify the password for DBI: as an argument; as an
+OOPS environment variable; as a DBI environment variable.  Not
+required for all databases.
+
+=item C<table_prefix> / C<$ENV{OOPS_PREFIX}>
 
 OOPS allows a prefix to be supplied for it's internal table names.  If you
 set a prefix of C<FOO_> then it will use a C<FOO_object> table instead
 of an C<object> table.  This can be set as an argument to C<new()> or it
 can be set with the environment variable C<$OOPS_PREFIX>.  This allows
 multiple separate object spaces to exist within the same SQL database.
-It's intended use is to support testing.
+It's intended use is to support testing vs. production environments.
 
-=item C<OOPS-E<gt>inital_setup(dbi_dsn =E<gt> $dbi_dsn, user =E<gt> $user, password =E<gt> $password, table_prefix =E<gt> $prefix)>
+=item C<auto_upgrade> / C<$ENV{OOPS_UPGRADE}>
 
-Drops and recreates the database tables.  Don't use it too often :-)
-The regression suite drops and re-creates the tables many times.  Be careful.
+The relational schema for OOPS is not same for all versions of OOPS.  If 
+this is set, then an older schema will be upgraded to the current schema.
+If this is not set, then OOPS will use the older schema unchanged.  In most
+cases, this means that OOPS will use a historical version of itself rather
+than the current version.   See the SCHEMA VERSIONS section of this document.
+
+=item C<auto_initialize> / C<$ENV{OOPS_INIT}>
+
+The DBMS must be initialized before it can be used: tables created, a few
+rows inserted, etc.  This can be handled by calling C<initial_setup()> or
+it can be handled automatically by C<new()> if C<auto_initialize> or
+C<$OOPS_AUTO_INIT> is set.
+
+=item C<default_synchronous> / C<$ENV{OOPS_SYNC}>
+
+With SQLite, an additional parameter to C<OOPS-E<gt>new()> is recognized:
+C<default_synchronous>.  Possible values are:
+
+=over 8
+
+=item FULL
+
+Sync() all transactions to disk before returning.
+
+=item NORMAL
+
+The default: sync() at critical moments only - protects against program
+failure, but not all power or OS failures.
+
+=item OFF
+
+Don't sync() at all and go really fast.
+
+=back
 
 =back
 
@@ -412,6 +484,20 @@ FreeBSD uses perl's C<malloc()>.
 
 =back
 
+=head1 SCHEMA VERSIONS
+
+As OOPS is developed, the schema that OOPS uses changes.  At the current
+time, all versions of OOPS use forward and backwards compatable (though
+not identical) schemas.
+
+OOPS notices if the version of the schema in the DBMS is different than
+the version the code currently supports.  When this happens there are
+two possibilities: either OOPS will upgrade the schema to the current
+version or it will use an older version of OOPS to access the data.
+
+This behavior allows the OOPS module to be upgraded without distrupting
+installed applications.
+
 =head1 FUTURE DIRECTIONS
 
 OOPS isn't done.  There are a bunch of things that I am considering
@@ -516,6 +602,11 @@ out the circular references.
 Right now, just HASH, SCALAR, REF, and ARRAY are supported.  Regular
 expressions, file handles,  I don't know it's possible to support code
 references.
+
+=item on-line data migration
+
+By doing double updates, OOPS could support live migration from one
+DBMS to another.
 
 =back
 
@@ -863,6 +954,11 @@ Complex.  Can cache database rows.
 
 Must define schmea.  RDBMS schema is created from perl 
 schema.
+
+=item DBM::Deep
+
+DBM::Deep handles deep and cross-linked data.  It does not have support
+for queries or transactions.
 
 =item Pixie
 

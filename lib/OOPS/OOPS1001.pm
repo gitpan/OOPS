@@ -1,9 +1,8 @@
 
-package OOPS;
+package OOPS::OOPS1001;
 
-our $VERSION = 0.1003;
-our $SCHEMA_VERSION = 1003;
-our $SCHEMA_WAS_OKAY = 1001;
+our $VERSION = 0.1002;
+our $SCHEMA_VERSION = 1001;
 our $SCHEMA_WILL_BE_OKAY = 1009;
 
 require 5.008002;
@@ -16,7 +15,7 @@ use DBI;
 use strict;
 use warnings;
 #use diagnostics;
-use Carp qw(confess longmess verbose croak);
+use Carp qw(confess longmess verbose);
 use Scalar::Util qw(refaddr reftype blessed weaken);
 use Hash::Util qw(lock_keys);
 use B qw(svref_2object);
@@ -26,7 +25,7 @@ use UNIVERSAL qw(can);
 # This is a self source filter.
 #
 BEGIN {
-	package OOPS::SelfFilter;
+	package OOPS::OOPS1001::SelfFilter;
 	sub filter
 	{
 		my $more = filter_read();
@@ -35,7 +34,7 @@ BEGIN {
 	}
 	use Filter::Util::Call ;
 	filter_add(bless [], __PACKAGE__)
-		unless $OOPS::SelfFilter::defeat;
+		unless $OOPS::OOPS1001::SelfFilter::defeat;
 }
 
 our $bigcutoff = 255;
@@ -45,7 +44,7 @@ our $oopses = 0;
 my $nopkey = 'nopkey';
 our $warnings = 1;
 our $transaction_maxtries = 15;
-our $transfailrx = qr/Deadlock found when trying to get lock|Duplicate entry|ERROR:  duplicate key violates unique constraint|ERROR:  could not serialize access due to concurrent update/;
+our $transfailrx = qr/\ADeadlock found when trying to get lock|\ADuplicate entry|\AERROR:  duplicate key violates unique constraint|\AERROR:  could not serialize access due to concurrent update/;
 our $id_alloc_size = 10;
 
 my %typesymbol = (
@@ -69,7 +68,7 @@ my %perltype2otype = (
 
 our $debug_free_tied		= 0;
 our $debug_tiedvars		= 0;		# produces no output -- just verification
-our $debug_oops_instances	= 0;		# track allocation / destructions of OOPS objects
+our $debug_oops_instances	= 0;		# track allocation / destructions of OOPS::OOPS1001 objects
 our $debug_load_object		= 0;		# basic loading of objects
 our $debug_load_values		= 0;		# loading of all keys & values
 our $debug_load_context		= 0;		# stack trace for each load
@@ -120,19 +119,16 @@ my $global_destruction = 0;
 
 our %tiedvars;
 
-tie my %qtype, 'OOPS::debug', sub { return reftype($_[0]) };
-tie my %qref, 'OOPS::debug', sub { return ref($_[0]) };
-tie my %qaddr, 'OOPS::debug', sub { return refaddr($_[0]) };
-tie my %qnone, 'OOPS::debug', sub { $_[0] };
-tie my %qmakeref, 'OOPS::debug', sub { \$_[0] };
-tie my %qval, 'OOPS::debug', sub { return defined $_[0] ? (ref($_[0]) ? "$_[0] \@ $qaddr{$_[0]}" : "'$_[0]'") : 'undef' };
-tie my %qplusminus, 'OOPS::debug', sub { $_[0] >= 0 ? "+$_[0]" : $_[0] };
-tie my %caller, 'OOPS::debug', sub { my $lvls = $_[0]+1; my ($p,$f,$l) = caller($lvls); my $s = (caller($lvls+1))[3]; $s =~ s/OOPS:://; $l = $f eq __FILE__ ? $l : "$f:$l";  return "$s/$l" };
-tie my %qmemval, 'OOPS::debug', sub { my $v = shift; return "*$v" unless ref $v; return "*$v->[0]/$qval{$v->[1]}" };
-tie my %qsym, 'OOPS::debug', sub { return $typesymbol{reftype(shift)} };
-
-sub OOPS::debug::TIEHASH { my $p = shift; return bless shift, $p } 
-sub OOPS::debug::FETCH { my $f = shift; return &$f(shift) } 
+tie my %qtype, 'OOPS::OOPS1001::debug', sub { return reftype($_[0]) };
+tie my %qref, 'OOPS::OOPS1001::debug', sub { return ref($_[0]) };
+tie my %qaddr, 'OOPS::OOPS1001::debug', sub { return refaddr($_[0]) };
+tie my %qnone, 'OOPS::OOPS1001::debug', sub { $_[0] };
+tie my %qmakeref, 'OOPS::OOPS1001::debug', sub { \$_[0] };
+tie my %qval, 'OOPS::OOPS1001::debug', sub { return defined $_[0] ? (ref($_[0]) ? "$_[0] \@ $qaddr{$_[0]}" : "'$_[0]'") : 'undef' };
+tie my %qplusminus, 'OOPS::OOPS1001::debug', sub { $_[0] >= 0 ? "+$_[0]" : $_[0] };
+tie my %caller, 'OOPS::OOPS1001::debug', sub { my $lvls = $_[0]+1; my ($p,$f,$l) = caller($lvls); my $s = (caller($lvls+1))[3]; $s =~ s/OOPS::OOPS1001:://; $l = $f eq __FILE__ ? $l : "$f:$l";  return "$s/$l" };
+tie my %qmemval, 'OOPS::OOPS1001::debug', sub { my $v = shift; return "*$v" unless ref $v; return "*$v->[0]/$qval{$v->[1]}" };
+tie my %qsym, 'OOPS::OOPS1001::debug', sub { return $typesymbol{reftype(shift)} };
 
 sub new
 {
@@ -182,15 +178,14 @@ sub new
 		args		=> \%args,  # creation arguments
 	};
 
-	print "# CREATE $$'s OOPS $oops\n" if $debug_oops_instances;
+	print "# CREATE $$'s OOPS::OOPS1001 $oops\n" if $debug_oops_instances;
 
-	my ($dbh, $dbms, $prefix) = OOPS->dbiconnect(%args);
+	my ($dbh, $dbms, $prefix) = OOPS::OOPS1001->dbiconnect(%args);
 
-	require "OOPS/$dbms.pm";
+	require "OOPS/OOPS1001/$dbms.pm";
 
 	$oops->{dbh} 		= $dbh;
 	$oops->{table_prefix}	= $prefix; 
-	$oops->{dbms}		= $dbms;
 	bless $oops, $pkg."::$dbms";
 	print "BLESSED $oops at ".__LINE__."\n" if $debug_blessing;
 
@@ -304,40 +299,22 @@ END
 
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
 	$oops->initialize();
-
-	eval { $oops->{named_objects} = $oops->load_virtual_object(1) };
-	if ($@) {
-		my $e = $@;
-		require OOPS::Setup;
-		my $err = $oops->load_failure($e);
-		die $err if $err;
-	}
+	$oops->{named_objects} = $oops->load_virtual_object(1);
 
 	if ($oops->{arraylen}{1} != $SCHEMA_VERSION) {
-		my $schema_version = $oops->{arraylen}{1};
-		if ($oops->{args}{auto_upgrade} || $ENV{OOPS_UPGRADE}) {
-			require "OOPS/Upgrade/To$SCHEMA_VERSION.pm";
-			no strict qw(refs);
-			&{"OOPS::Upgrade::To${SCHEMA_VERSION}::upgrade"}($oops, $schema_version);
-		} else {
-			$oops->{dbh}->disconnect();
-			delete $oops->{dbh};
-			$oops->byebye();
-			require "OOPS/OOPS$schema_version.pm"
-				|| die "could not find historical version $schema_version: $@";
-			no strict qw(refs);
-			return &{"OOPS::OOPS${schema_version}::new"}("OOPS::OOPS$schema_version", %{$oops->{args}});
-		}
+		die "version mismatch" unless 
+			$oops->{arraylen}{1} >= $SCHEMA_VERSION
+			&& $oops->{arraylen}{1} <= $SCHEMA_WILL_BE_OKAY;
 	}
 
 	$oopses++;
-	print "CREATE OOPS $oops [$oopses]\n" if $debug_free_tied;
+	print "CREATE OOPS::OOPS1001 $oops [$oopses]\n" if $debug_free_tied;
 	$tiedvars{$oops} = longmess if $debug_tiedvars;
 	lock_keys(%$oops);
 	assertions($oops);
 
 	return $oops if $args{no_front_end};
-	return OOPS::FrontEnd->new($oops);
+	return OOPS::OOPS1001::FrontEnd->new($oops);
 }
 
 sub dbiconnect
@@ -365,7 +342,7 @@ sub dbiconnect
 		}
 	}
 	die "no database specified" unless $database;
-	die "only mysql, PostgreSQL & SQLite supported" unless $database =~ /^dbi:(mysql|pg|sqlite)\b/i;
+	die "only mysql, postgres & sqlite supported" unless $database =~ /^dbi:(mysql|pg|sqlite)\b/i;
 	my $dbms = "\L$1";
 	$user = $user || $ENV{OOPS_USER} || $ENV{DBI_USER};
 	$password = $password || $ENV{OOPS_PASS} || $ENV{DBI_PASS};
@@ -382,14 +359,70 @@ sub dbiconnect
 
 sub initial_setup
 {
-	require OOPS::Setup;
-	goto &initial_setup_real;
+	my ($pkg, %args) = @_;
+
+	my ($dbh, $dbms) = OOPS::OOPS1001->dbiconnect(%args);
+	$dbh->disconnect;
+	require "OOPS/OOPS1001/$dbms.pm";
+
+	# create tables, initial objects, etc.
+	no strict 'refs';
+	my $x;
+	for my $t (&{"OOPS::OOPS1001::${dbms}::table_list"}()) {
+		$x .= "-DROP TABLE $t;\n";
+	}
+	db_domany($pkg, \%args, 
+		$x 
+		. &{"OOPS::OOPS1001::${dbms}::tabledefs"}() 
+		. db_initial_values() 
+		. &{"OOPS::OOPS1001::${dbms}::db_initial_values"}());
+	return $dbms;
+}
+
+sub db_initial_values
+{
+	return <<END;
+	INSERT INTO TP_object values (1, 1, 'HASH', 'H', 'V', '0', '0', $SCHEMA_VERSION, 1, 1);
+	INSERT INTO TP_attribute values (2, 'user objects', '1', 'R');
+
+	INSERT INTO TP_object values (2, 2, 'HASH', 'H', 'V', '0', '0', 0, 1, 1);
+	INSERT INTO TP_attribute values (2, 'internal objects', '2', 'R');
+	INSERT INTO TP_attribute values (2, 'VERSION', '$VERSION', '0');
+	INSERT INTO TP_attribute values (2, 'SCHEMA_VERSION', '$SCHEMA_VERSION', '0');
+
+	INSERT INTO TP_object values (3, 3, 'HASH', 'H', 'V', '0', '0', 0, 1, 1);
+	INSERT INTO TP_attribute values (2, 'counters', '3', 'R');
+END
+}
+
+sub db_domany
+{
+	my ($pkg, $connectargs, $x) = @_;
+	my ($dbh, $dbms, $prefix) = OOPS::OOPS1001->dbiconnect(%$connectargs);
+	local($@);
+	while ($x =~ /\G\s*(\S.*?);\n/sg) {
+		my $stmt = $1;
+		$stmt =~ s/TP_/$prefix/g;
+		# print "do $stmt\n";
+		if ($stmt =~ s/^-//) {
+			eval { $dbh->do($stmt) } || do {
+				warn "do '$stmt':".$dbh->errstr;
+				$dbh->disconnect;
+				$dbh = OOPS::OOPS1001->dbiconnect(%$connectargs);
+			};
+		} else {
+			eval { $dbh->do($stmt) } || die "<<$stmt>>".$dbh->errstr;
+			die $@ if $@;
+		}
+	}
+	$dbh->commit;
+	$dbh->disconnect;
 }
 
 sub load_object
 {
 	my ($oops, $objectid) = @_;
-	confess unless $oops->isa('OOPS');  # XX why?
+	confess unless $oops->isa('OOPS::OOPS1001');  # XX why?
 	$objectid = $oops->{named_objects}->{$objectid}
 		if $objectid == 0;
 	confess unless $objectid;
@@ -461,7 +494,7 @@ sub load_object
 			$cache->{$object} = \$x;
 			print "*$object load_object cache := fresh scalar: $qval{$cache->{$object}}\n" if $debug_cache;
 		} else {
-			confess;
+			die;
 		}
 		$oops->{arraylen}{$object} = $arraylen;
 		$oops->{reftarg}{$object} = $reftarg;
@@ -508,15 +541,15 @@ sub load_object
 						# can track if the linkage is used.
 						#
 						$cache->{$id}[$pkey] = undef;
-						tie $cache->{$id}[$pkey], 'OOPS::ObjectInArray', $id, $pkey, $pval, $oops;
+						tie $cache->{$id}[$pkey], 'OOPS::OOPS1001::ObjectInArray', $id, $pkey, $pval, $oops;
 						$oops->{oldobject}{$id}{$pkey} = $pval;
 						print "OLDOBJECT loadobject *$id/$pkey = *$pval (in array)\n" if $debug_oldobject
 					} elsif ($ptype eq 'B') {
 						$cache->{$id}[$pkey] = $pval;
-						tie $cache->{$id}[$pkey], 'OOPS::BigInArray', $id, $pkey, $pval, $oops;
+						tie $cache->{$id}[$pkey], 'OOPS::OOPS1001::BigInArray', $id, $pkey, $pval, $oops;
 						$oops->{oldbig}{$id}{$pkey} = $pval;
 					} else {
-						confess "ptype = $ptype";
+						die "ptype = $ptype";
 					}
 					$ref = \$cache->{$id}[$pkey];
 				} elsif ($t eq 'S') {
@@ -527,10 +560,10 @@ sub load_object
 						print "*$object load_object cache := new fresh scalar: $qval{$cache->{$object}}\n" if $debug_cache;
 						if ($ptype eq 'R') {
 							print "\$*$id = *$pval -- RefObject\n" if $debug_refalias && defined($pval);
-							tie ${$cache->{$id}}, 'OOPS::RefObject', $oops, $id, $pval;
+							tie ${$cache->{$id}}, 'OOPS::OOPS1001::RefObject', $oops, $id, $pval;
 						} elsif ($ptype eq 'B') {
 							print "\$*$id = '$pval...' -- RefBig\n" if $debug_refalias && defined($pval);
-							tie ${$cache->{$id}}, 'OOPS::RefBig', $oops, $id, $pval;
+							tie ${$cache->{$id}}, 'OOPS::OOPS1001::RefBig', $oops, $id, $pval;
 						} elsif ($ptype eq '0') {
 							$oops->{objtouched}{$id} = 'always';
 							$oops->{oldvalue}{$id}{$nopkey} = $pval;
@@ -538,7 +571,7 @@ sub load_object
 							print "\$*$id = '$pval' -- no tie at all\n" if $debug_refalias && defined($pval);
 							print "\$*$id = undef -- no tie at all\n" if $debug_refalias && ! defined($pval);
 						} else {
-							confess;
+							die;
 						}
 					} elsif (0 && exists $cache->{$pkey} # XXXXX REMOVE
 						&& ! exists $new{$pkey} 
@@ -559,11 +592,11 @@ sub load_object
 						print "\$*$id load_object cache = untied reference to *$pkey/'$pval' ($qval{$cache->{$id}})\n" if $debug_refalias || $debug_cache;
 					} else {
 						print "\$*$id = '$pval' -- RefAlias to $pkey/'$pval'\n" if $debug_refalias && defined($pval);
-						tie $cache->{$id}, 'OOPS::RefAlias', $oops, $id, $pkey, $pval;
+						tie $cache->{$id}, 'OOPS::OOPS1001::RefAlias', $oops, $id, $pkey, $pval;
 						$oops->{aliasdest}{$pkey}{$id} = $pval;
 					}
 				} else {
-					confess;
+					die;
 				}
 				#
 				# 
@@ -580,17 +613,17 @@ sub load_object
 			if ($objectgrouploadQ->err) {
 				if ($objectgrouploadQ->errstr() =~ /fetch\(\) without execute\(\)/) {
 					warn "working around DBI bug";
-					$objectgrouploadQ->execute($atloadgroup) || confess $objectgrouploadQ->errstr;
+					$objectgrouploadQ->execute($atloadgroup) || die $objectgrouploadQ->errstr;
 					next;
 				} else {
-					confess "fetch_array error ".$objectgrouploadQ->errstr;
+					die "fetch_array error ".$objectgrouploadQ->errstr;
 				}
 			}
 			last;
 		}
 		# $objectgrouploadQ->finish();
 	} else {
-		confess "no loadgroup!";
+		die "no loadgroup!";
 	}
 
 	my @cblist;
@@ -600,11 +633,11 @@ sub load_object
 			print "*$id load_object BLESSED $qval{$cache->{$id}} at ".__LINE__."\n"  if $debug_blessing || $debug_cache;
 		}
 		print "$typesymbol{$type->{$id}}$id is $oclass->{$id}\n" if $debug_load_values;
-confess if $oclass->{$id} eq 'OOPS';
+die if $oclass->{$id} eq 'OOPS::OOPS1001';
 		if ($type->{$id} eq 'H') {
 			print "\%$id loaded - $qval{$cache->{$id}}\n" if $debug_load_object;
 			# tied hashes cannot access the underlying variable during callbacks
-			my $tied = tie %{$cache->{$id}}, 'OOPS::NormalHash', $new{$id}, $newptype{$id}, $oops, $id;
+			my $tied = tie %{$cache->{$id}}, 'OOPS::OOPS1001::NormalHash', $new{$id}, $newptype{$id}, $oops, $id;
 			$oops->memory($tied, $id);
 			print "MEMORY(TIED) ".refaddr($tied)." := *$id' - tied hash, in load_object\n" if $debug_memory;
 			$oops->memory($cache->{$id}, $id);
@@ -635,7 +668,7 @@ confess if $oclass->{$id} eq 'OOPS';
 			# $memory->{refaddr(\$cache->{$a})} = $id;
 			# print "MEMORY $qval{\$cache->{$a}} := *$id REF to CACHE\n" if $debug_memory;
 		} else {
-			confess;
+			die;
 		}
 		print "in load_object, $typesymbol{$type->{$id}} *$id loaded, refcount (=$refcount->{$id})\n" if $debug_refcount;
 		push(@cblist, $id) 
@@ -655,22 +688,23 @@ confess if $oclass->{$id} eq 'OOPS';
 sub load_virtual_object
 {
 	my ($oops, $objectid) = @_;
+	die unless $oops->isa('OOPS::OOPS1001');  # XX why?
 
 	$objectid = $oops->{named_objects}{$objectid}
 		if $objectid == 0;
-	confess unless $objectid;
+	die unless $objectid;
 
 	my $objectinfoQ = $oops->query('objectinfo', execute => $objectid);
-	return $objectinfoQ unless ref $objectinfoQ;
 	my ($loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $refs) = $objectinfoQ->fetchrow_array();
-	die "no object $objectid: ".$objectinfoQ->errstr unless $otype;
+	die unless $otype;
 	$objectinfoQ->finish();
 
 	my %underlying;
 	my $obj = \%underlying;
 	bless $obj, $class unless $typesymbol{$class};
 	print "*$objectid BLESSED $obj at ".__LINE__."\n" if $debug_blessing;
-	my $tied = tie %$obj, 'OOPS::DemandHash', $oops, $objectid;
+#print "tie \%$objectid - $obj DEMANDHASH\n";
+	my $tied = tie %$obj, 'OOPS::OOPS1001::DemandHash', $oops, $objectid;
 	$oops->{virtual}{$objectid} = 'V';
 	$oops->{arraylen}{$objectid} = $arraylen;
 	$oops->{reftarg}{$objectid} = $reftarg;
@@ -736,27 +770,28 @@ sub transaction
 	my $r;
 	my @r;
 	my $tries = 0;
-	my $auto_die = 0;
-	my $err;
+	my $die = 0;
+	local($@);
 	for (;;) {
-		croak "next inside eval" if $auto_die; # protect aginst 'next' et all inside eval
-		$auto_die = 1; 
-		if ($wantarray) {
-			eval { @r = &$funcref(@args); }
-		} else {
-			eval { $r = &$funcref(@args); }
+		die if $die; # protect aginst 'next' et all inside eval
+		$die = 1; 
+		eval {
+			if ($wantarray) {
+				@r = &$funcref(@args);
+			} else {
+				$r = &$funcref(@args);
+			}
 		};
-		last unless $@;
 		if ($@ =~ /$transfailrx/) {
 			print STDERR "Restarting transaction\n" if $warnings;
 			if ($tries++ > $transaction_maxtries) {
-				$err = "aborting transaction -- persistent deadlock";
-				last;
+				die "aborting transaction -- persistent deadlock";
 			}
-			$auto_die = 0;
+			$die = 0;
 			redo;
 		}
-		croak $@;
+		croak $@ if $@;
+		last;
 	}
 	return @r if $wantarray;
 	return $r;
@@ -770,7 +805,7 @@ sub getref(\%$)
 	my $hash = shift;
 	my $key = shift;
 	my $tied = tied %$hash;
-	confess unless reftype($hash) eq 'HASH';
+	die unless reftype($hash) eq 'HASH';
 	return \$hash->{$key} unless $tied && $tied->can('GETREF');
 	print "getref getting references for '$key'\n" if $debug_27555;
 	return $tied->GETREF($key);
@@ -789,7 +824,9 @@ sub commit
 	my $oops = shift;
 	$oops->save;
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
-	$oops->{dbh}->commit || die $oops->{dbh}->errstr;
+	local($@);
+	eval { $oops->{dbh}->commit } || die $oops->{dbh}->errstr;
+	confess $@ if $@;
 	print "COMMIT $oops done\n" if $debug_commit;
 	assertions($oops);
 }
@@ -802,7 +839,7 @@ sub save
 
 	print "COMMIT start \@ $caller{1}\n" if $debug_commit;
 
-	confess unless $oops->isa('OOPS');
+	die unless $oops->isa('OOPS::OOPS1001');
 	my $savedone = $oops->{savedone} = {};
 	my $forcesave = $oops->{forcesave} = {};
 
@@ -849,7 +886,7 @@ sub save
 		} elsif ($t eq 'S') {
 			$tied = tied ${$cache->{$id}};
 		} else {
-			confess "type = $t.";
+			die "type = $t.";
 		}
 		push(@tied, $tied);
 	}
@@ -892,7 +929,7 @@ sub save
 					my $newobject = ($refcount->{$id} == -1);
 					$refcount->{$id} += $refchange->{$id};
 					if ($refcount->{$id} > 0) {
-						my $otype = $type->{$id} || confess;
+						my $otype = $type->{$id} || die;
 						my $loadgroup;
 						if (exists $loadgrouplock->{$id}) {
 							my $locked_to = $loadgrouplock->{$id};
@@ -914,7 +951,7 @@ sub save
 						$oloadgroup->{$id} = $loadgroup;
 						print "*$id updated1. loadgroup=$loadgroup, class=$qref{$cache->{$id}} otype=$otype, virtual=$virtual->{$id} reftarg=$reftarg->{$id} refcount=$refcount->{$id} arraylen=$arraylen->{$id}\n" if $debug_load_group || $debug_isvirtual || $debug_write_object || $debug_arraylen || $debug_refcount;
 						$updateobjectQ->execute($loadgroup, ref($cache->{$id}), $otype, $virtual->{$id} || '0', $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $id)
-							|| confess $updateobjectQ->errstr;
+							|| die $updateobjectQ->errstr;
 #print "updated $id $refcount->{$id}\n";
 						$oclass->{$id} = ref($cache->{$id});
 						$classdone{$id} = __LINE__;
@@ -926,20 +963,20 @@ sub save
 						confess "refcount: $refcount->{$id}";
 					}
 				} else {
-					$objectinfoQ->execute($id) || confess;
+					$objectinfoQ->execute($id) || die;
 					my ($loadgroup, $class, $otype, $ovirtual, $oreftarg, $oarraylen, $refs) = $objectinfoQ->fetchrow_array;
 					$objectinfoQ->finish();
-					confess unless $class;
+					die unless $class;
 					printf "in commit, uncached *%d refs: old %d +change %d = (=%d)\n", $id, $refs, $refchange->{$id}, $refs+ $refchange->{$id} if $debug_refcount || $debug_write_object;
 					$refcount->{$id} = $refs + $refchange->{$id};
-					confess if exists $cache->{$id};
+					die if exists $cache->{$id};
 					if ($refcount->{$id} > 0) {
 						$updateobjectQ->execute($loadgroup, $class, $otype, $ovirtual || '0', $oreftarg, $oarraylen, $refcount->{$id}, $id);
 						print "*$id updated2. loadgroup=$loadgroup, type=$class, otype=$otype, refcount=$refcount->{$id} virtual=$ovirtual reftarg=$oreftarg arraylen=$oarraylen\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount;
 					} elsif ($refcount->{$id} == 0) {
 						$oops->delete_object($id);
 					} else {
-						confess;
+						die;
 					}
 				}
 			} else {
@@ -980,14 +1017,15 @@ sub save
 	# allows a less strict tranaction locking default.
 	# 
 	#
-	my $die;
+	local($@);
 	for my $id (keys %$forcesave) {
 		next if $done{$id} && $forcesave->{$id} == 1;
-		my $type = $type->{$id} || confess;
+		my $type = $type->{$id} || die;
 		my $loadgroup = $oloadgroup->{$id} || $id;
 		print "*$id updated3. loadgroup=$loadgroup, type=".ref($cache->{$id})." otype=$type, refcount=$refcount->{$id} virtual=$virtual->{$id} reftarg=$reftarg arraylen=$arraylen->{$id}\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount;
-		$updateobjectQ->execute($loadgroup, ref($cache->{$id}), $type, $virtual->{$id}, $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $id)
-			|| confess $updateobjectQ->errstr; 
+		eval { $updateobjectQ->execute($loadgroup, ref($cache->{$id}), $type, $virtual->{$id}, $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $id) }
+			|| die $updateobjectQ->errstr;
+		die $@ if $@;
 		$oclass->{$id} = ref($cache->{$id});
 	}
 
@@ -999,13 +1037,14 @@ sub save
 sub write_object
 {
 	my ($oops, $id) = @_;
+	die unless $oops->isa('OOPS::OOPS1001');
 	$id = $oops->get_object_id($id) 
 		if ref $id; 
 
 	return if $oops->{savedone}{$id}++; 
 
 	my $obj = $oops->{cache}{$id};
-	my $type = $perltype2otype{reftype($obj)} || confess;
+	my $type = $perltype2otype{reftype($obj)} || die;
 
 	my $sym = $typesymbol{$type} || '???' if $debug_write_object;
 	print "$sym*$id write_object $qval{$obj}\n" if $debug_write_object;
@@ -1019,7 +1058,7 @@ sub write_object
 
 	if ($type eq 'H') {
 		my $tied = tied(%$obj);
-		if ($tied && $tied =~ /^OOPS/) {
+		if ($tied && $tied =~ /^OOPS::OOPS1001/) {
 			print "%*$id write_object - using SAVE_SELF $qval{$tied}\n" if $debug_write_hash;
 			$tied->SAVE_SELF();
 		} else {
@@ -1029,7 +1068,7 @@ sub write_object
 		$oops->write_array($id);
 	} elsif ($type eq 'S') {
 		my $tied = tied($$obj);
-		if ($tied && $tied =~ /^OOPS/) {
+		if ($tied && $tied =~ /^OOPS::OOPS1001/) {
 			print "\$*$id using SAVE_SELF $tied\n" if $debug_write_ref;
 			$tied->SAVE_SELF() && push(@{$oops->{refstowrite}}, $id);
 		} else {
@@ -1051,7 +1090,7 @@ sub write_object
 			push(@{$oops->{refstowrite}}, $id);
 		}
 	} else {
-		confess;
+		die;
 	}
 	print "$sym*$id done with write_object\n" if $debug_write_object;
 	assertions($oops);
@@ -1192,6 +1231,7 @@ sub write_array
 	my $new_memory2key = $oops->{new_memory2key};
 
 	my $tied;
+die if tied(@$obj);
 	my $isnew = $oops->{refcount}{$id} == -1;
 
 
@@ -1212,7 +1252,7 @@ sub write_array
 	for (my $index = 0; $index <= $#$obj; $index++) {
 		my $tied;
 		next unless exists $obj->[$index];
-		next unless ($tied = tied $obj->[$index]) && $tied->isa('OOPS::BigInArray');
+		next unless ($tied = tied $obj->[$index]) && $tied->isa('OOPS::OOPS1001::BigInArray');
 		undef $tied; # keeping copies of tied objects prevents untieing.
 		my $x = defined($obj->[$index]);   # force loading (which will untie)
 	}
@@ -1240,7 +1280,7 @@ sub write_array
 		}
 		print "$sym$id/$index pondering... ($obj->[$index])\n" if $debug_write_array;
 		my $tied;
-		if (($tied = tied $obj->[$index]) && $tied =~ /^OOPS::Demand/ && ! $tied->changed($index)) {
+		if (($tied = tied $obj->[$index]) && $tied =~ /^OOPS::OOPS1001::Demand/ && ! $tied->changed($index)) {
 			print "\@$id/$index tied and unchanged\n" if $debug_write_array;
 		} elsif (exists $oldvalue->{$id} && exists $oldvalue->{$id}{$index}) {
 			no warnings;
@@ -1554,6 +1594,7 @@ sub update_attribute
 {
 	print Carp::longmess("DEBUG: update_attribute(@_) called") if 0; # debug
 	my $oops = shift;
+	die unless $oops->isa('OOPS::OOPS1001');
 	my $id = shift;
 	my $pkey = shift;
 	my $oldover = exists $oops->{oldbig}{$id} && exists $oops->{oldbig}{$id}{$pkey};
@@ -1576,6 +1617,10 @@ sub update_attribute
 		$ptype = 'R';
 	} else {
 		$atval = $_[0];
+
+		#$ptype = $newptype;
+		#die if $newptype eq 'R' && $oldobject;
+		#die if $newptype eq 'B' && $oldover;
 	}
 	if (ref($_[2])) {
 		# old value was a reference
@@ -1634,6 +1679,7 @@ sub update_attribute
 sub prepare_insert_attribute
 {
 	my $oops = shift;
+	die unless $oops->isa('OOPS::OOPS1001');
 	my $id = shift;
 	my $pkey = shift;
 	my $atval;
@@ -1686,6 +1732,7 @@ sub insert_attribute
 sub delete_attribute
 {
 	my $oops = shift;
+	die unless $oops->isa('OOPS::OOPS1001');
 	my $id = shift;
 	my $pkey = shift;
 	my $sym;
@@ -1727,7 +1774,7 @@ sub get_object_id
 	my ($oops, $obj) = @_;
 	confess unless ref $oops;
 	confess unless blessed $oops;
-	confess unless $oops->isa('OOPS');
+	confess unless $oops->isa('OOPS::OOPS1001');
 	my $bt = reftype($obj);
 	my $mem = refaddr($obj);
 	my $found = $oops->{memory}{$mem};
@@ -1743,7 +1790,7 @@ sub get_object_id
 	# then we could save the extra save much of the time
 	#
 	my $saveobjectQ = $oops->query('saveobject');
-	$saveobjectQ->execute($id, $id, "will be".ref($obj), '?', '?', '?', 0, -9999) || confess $saveobjectQ->errstr;
+	$saveobjectQ->execute($id, $id, "will be".ref($obj), '?', '?', '?', 0, -9999) || die $saveobjectQ->errstr;
 
 	$id = $oops->post_new_object($id);
 
@@ -1763,7 +1810,7 @@ sub get_object_id
 	print "in get_object_id, *$id is new: count=-1, change=+1 (=0)\n" if $debug_refcount;
 	print "$typesymbol{$bt}$id created as new object: $obj\n" if $debug_writes;
 	$oops->{otype}{$id} = $perltype2otype{$bt} || confess "bt='$bt',obj=$obj";
-	my $x = $obj->isa('OOPS::Aware')
+	my $x = $obj->isa('OOPS::OOPS1001::Aware')
 		unless $typesymbol{ref($obj)};
 	$obj->object_id_assigned($id)
 		if $x;
@@ -1777,6 +1824,7 @@ sub get_object_id
 sub delete_object
 {
 	my ($oops, $id) = @_;
+	die unless $oops->isa('OOPS::OOPS1001');
 	print "*$id begin delete\n" if $debug_cache;
 	$oops->predelete_object($id);
 	$oops->query('postdelete1', execute => $id);
@@ -1789,11 +1837,12 @@ sub delete_object
 sub predelete_object
 {
 	my ($oops, $id) = @_;
+	die unless $oops->isa('OOPS::OOPS1001');
 	print Carp::longmess("DEBUG: predelete_object(@_) called") if 0; # debug
 	unless (defined $oops->{reftarg}{$id}) {
 		my $objectinfoQ = $oops->query('objectinfo', execute => $id);
 		my ($loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $refs) = $objectinfoQ->fetchrow_array();
-		confess unless $otype;
+		die unless $otype;
 		$objectinfoQ->finish();
 		if ($oops->{reftarg}{$id} = $reftarg) {
 			$oops->load_object($id);
@@ -1811,7 +1860,7 @@ sub predelete_object
 		} elsif ($oops->{otype}{$id} eq 'S') {
 			# nada
 		} else {
-			confess;
+			die;
 		}
 		print "*$id searching for references to self\n" if $debug_refalias || $debug_reftarget;
 		my $reftargobjectQ = $oops->query('reftargobject', execute => $id);
@@ -1864,7 +1913,7 @@ sub save_big
 	my $id = shift;
 	my $pkey = shift;
 	my $savebigQ = $oops->query('savebig');
-	$savebigQ->execute($id, $pkey, $_[0]) || confess;
+	$savebigQ->execute($id, $pkey, $_[0]) || die;
 }
 
 sub update_big
@@ -1873,7 +1922,7 @@ sub update_big
 	my $id = shift;
 	my $pkey = shift;
 	my $updatebigQ = $oops->query('updatebig');
-	$updatebigQ->execute($_[0], $id, $pkey) || confess $updatebigQ->errstr;
+	$updatebigQ->execute($_[0], $id, $pkey) || die $updatebigQ->errstr;
 }
 
 sub query
@@ -1883,9 +1932,11 @@ sub query
 	my $query;
 	confess unless $query = $oops->{queries}{$q};
 	$query =~ s/TP_/$oops->{table_prefix}/g;
-	
+
+	local($@);
 	my $dbh = $args{dbh} || $oops->{dbh};
-	my $sth = $dbh->prepare_cached($query, undef, 3) || confess "prepare $query: ".$dbh->errstr;
+	my $sth = eval { $dbh->prepare_cached($query, undef, 3) } || die $dbh->errstr;
+	die $@ if $@;
 
 	if (exists $args{execute}) {
 		my @a = defined($args{execute})
@@ -1893,8 +1944,10 @@ sub query
 				? @{$args{execute}}
 				: $args{execute})
 			: ();
-		$sth->execute(@a) || confess("could not execute '$query' with '@a':".$sth->errstr);
+		eval { $sth->execute(@a) } || confess "could not execute '$query' with '@a':".$sth->errstr;
+		die $@ if $@;
 	}
+
 	assertions($oops);
 	return $sth;
 }
@@ -1909,7 +1962,7 @@ sub workaround27555
 	print "workaround27555($qaddr{\$_[0]}) addr $tiedaddr does not translate to id (key=$key)\n" if $debug_27555 && ! $id;
 	return $_[0] unless $id;
 	my $tied = tied %{$oops->{cache}{$id}};
-	confess unless $tied;
+	die unless $tied;
 	$_[0] = $tied->GETREF($key);
 	print "workaround27555($qaddr{\$_[0]}) references %*$id/'$key - replaced with GETREF\n" if $debug_27555;
 	return $_[0];
@@ -1982,9 +2035,9 @@ sub END
 sub DESTROY
 {
 	local($main::SIG{'__DIE__'}) = \&die_from_destroy;
-	print "OOPS::DESTROY called\n" if $debug_free_tied;
+	print "OOPS::OOPS1001::DESTROY called\n" if $debug_free_tied;
 	my $oops = shift;
-	print "# DESTROY $$'s OOPS $oops\n" if $debug_oops_instances && $oops->{dbh};
+	print "# DESTROY $$'s OOPS::OOPS1001 $oops\n" if $debug_oops_instances && $oops->{dbh};
 #print STDERR "self = $oops\n";
 	my $cache = $oops->{cache} || {};
 	for my $id (keys %$cache) {
@@ -1999,20 +2052,22 @@ sub DESTROY
 		} elsif ($t eq 'SCALAR' || $t eq 'REF') {
 			$tied = tied($cache->{$id}) || ref($cache->{$id}) ? tied ${$cache->{$id}} : undef;
 		} else {
-			confess "type($id) = '$t'";
+			die "type($id) = '$t'";
 		}
 #print "istied($id) = $tied\n";
 		next unless $tied;
-		next unless $tied =~ /^OOPS/;
+		next unless $tied =~ /^OOPS::OOPS1001/;
 		print "Calling *$id->destroy $qval{$tied}\n" if $debug_free_tied;
 		$tied->destroy;
 	}
-	$oops->{dbh}->disconnect() if $oops->{dbh};
+	local($@);
+	eval { $oops->{dbh}->disconnect() } if $oops->{dbh};
+	die $@ if $@;
 	$oops->byebye;
 	%$oops = ();
 	$oopses--;
 	assertions($oops);
-	print "DESTROY OOPS $oops [$oopses]\n" if $debug_free_tied;
+	print "DESTROY OOPS::OOPS1001 $oops [$oopses]\n" if $debug_free_tied;
 	delete $tiedvars{$oops} if $debug_tiedvars;
 }
 
@@ -2060,7 +2115,6 @@ sub tied_hash_reference
 {
 	my ($ref) = @_;
 	local($@);
-	local $SIG{'__DIE__'};
 	return eval {
 		my $magic = svref_2object($ref)->MAGIC;
 		$magic = $magic->MOREMAGIC
@@ -2078,7 +2132,7 @@ sub tied_hash_reference
 	# lot of time.
 	#
 
-	package OOPS::InArray;
+	package OOPS::OOPS1001::InArray;
 
 	#sub UNTIE
 	#{
@@ -2125,14 +2179,25 @@ sub tied_hash_reference
 		$self->{oops}->assertions;
 		return $self->{changed};
 	}
+
+	sub GETREF
+	{
+		die 'Why would this be used?';
+		my $self->shift;
+		$self->FETCH;
+		die if tied $self->{oops}{cache}{$self->{id}};
+		my $ref = \$self->{oops}{cache}{$self->{id}};
+		print "inarrayGETREF ref-to-cache: *$self->{id} ($qval{$self->{oops}{cache}{$self->{id}}}): $qval{$ref}\n" if $debug_cache;
+		return $ref;
+	}
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::ObjectInArray;
+	package OOPS::OOPS1001::ObjectInArray;
 
 	use Scalar::Util qw(weaken);
 	use Carp qw(longmess);
-	our (@ISA) = ('OOPS::InArray');
+	our (@ISA) = ('OOPS::OOPS1001::InArray');
 
 	sub TIESCALAR 
 	{
@@ -2174,11 +2239,11 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::BigInArray;
+	package OOPS::OOPS1001::BigInArray;
 
 	use Scalar::Util qw(weaken);
 	use Carp qw(longmess);
-	our (@ISA) = ('OOPS::InArray');
+	our (@ISA) = ('OOPS::OOPS1001::InArray');
 
 	sub TIESCALAR 
 	{
@@ -2217,7 +2282,7 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::RefAlias;
+	package OOPS::OOPS1001::RefAlias;
 
 	use Scalar::Util qw(weaken refaddr reftype);
 	use Carp qw(confess longmess);
@@ -2273,7 +2338,7 @@ sub tied_hash_reference
 		my $wa;
 		if (! exists $cache->{$objid}) {
 			print "\$*$id raFETCH loading object\n" if $debug_refalias;
-			$oops->load_object($objid) || confess;
+			$oops->load_object($objid) || die;
 		}
 		my $type = reftype($oops->{cache}{$objid});
 		if ($type eq 'HASH') {
@@ -2281,12 +2346,12 @@ sub tied_hash_reference
 				$ref = $tied->GETREFORIG($objkey);
 				print "\$*$id raFETCH tied, using *$objid->GETREFORIG($qval{$objkey}): $qval{$ref}\n" if $debug_refalias;
 			} else {
-				confess "this won't happen";
+				die "this won't happen";
 				# $ref = \$oops->{cache}{$objid}{$objkey};
 			}
 		} elsif ($type eq 'ARRAY') {
 			if ($tied = tied @{$cache->{$objid}}) {
-				confess "this won't happen";
+				die "this won't happen";
 			} else {
 				$ref = $oops->{refcopy}{$objid}{$objkey} || confess;
 				print "\$*$id raFETCH from array, using refcopy: $qval{$ref}\n" if $debug_refalias;
@@ -2296,7 +2361,7 @@ sub tied_hash_reference
 			# XXX What about if it's a refalias itself?  Shouldn't we be checking
 			# tied($cache->{$objid})?
 			#
-			confess "this code doesn't look right, is it used?";
+			die "this code doesn't look right, is it used?";
 			if ($tied = tied ${$cache->{$objid}}) {
 				print "\$*$id raFETCH tied, using GETREF\n" if $debug_refalias;
 				$ref = $tied->GETREF($objkey);
@@ -2305,7 +2370,7 @@ sub tied_hash_reference
 				print "\$*$id raFETCH from scalar, using cached *$objid: $qval{$ref}\n" if $debug_refalias;
 			}
 		} else {
-			confess;
+			die;
 		}
 		untie $cache->{$id};
 		$oops->{unwatched}{$id} = 1;
@@ -2314,7 +2379,7 @@ sub tied_hash_reference
 		print "*$id raFETCH cache := $qval{$ref}\n" if $debug_cache;
 		$oops->memory($ref, $id);
 		print "MEMORY $qval{$ref} = $id in raFETCH\n" if $debug_memory;
-		confess unless $ref;
+		die unless $ref;
 		return $ref;
 	}
 
@@ -2327,7 +2392,7 @@ sub tied_hash_reference
 
 	sub STORE
 	{
-		confess "why could this happen?";
+		die "why could this happen?";
 		my $self = shift;
 		my $val = shift;
 		my ($oops, $id, $objid, $objkey) = @$self;
@@ -2350,7 +2415,7 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::Ref;
+	package OOPS::OOPS1001::Ref;
 
 	use Scalar::Util qw(weaken);
 	use Carp qw(longmess confess);
@@ -2406,9 +2471,9 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::RefObject;
+	package OOPS::OOPS1001::RefObject;
 
-	our (@ISA) = qw(OOPS::Ref);
+	our (@ISA) = qw(OOPS::OOPS1001::Ref);
 
 	sub FETCH
 	{
@@ -2437,9 +2502,9 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::RefBig;
+	package OOPS::OOPS1001::RefBig;
 
-	our (@ISA) = qw(OOPS::Ref);
+	our (@ISA) = qw(OOPS::OOPS1001::Ref);
 
 	sub FETCH
 	{
@@ -2462,7 +2527,7 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::NormalHash;
+	package OOPS::OOPS1001::NormalHash;
 
 	use Scalar::Util qw(weaken reftype refaddr);
 	use Carp qw(confess longmess);
@@ -2501,7 +2566,7 @@ sub tied_hash_reference
 	# called too soon?
 	sub DESTROY
 	{
-		local($main::SIG{'__DIE__'}) = \&OOPS::die_from_destroy;
+		local($main::SIG{'__DIE__'}) = \&OOPS::OOPS1001::die_from_destroy;
 		my $self = shift;
 		my ($values, $ptypes, $added, $oops, $id, $vars) = @$self;
 		delete $tiedvars{$self} if $debug_tiedvars;
@@ -2536,7 +2601,7 @@ sub tied_hash_reference
 		$oops->assertions;
 	}
 
-	#	tie %{$cache->{$id}}, 'OOPS::NormalHash', $new{$id}, $newptype{$id}, $oops, $id;
+	#	tie %{$cache->{$id}}, 'OOPS::OOPS1001::NormalHash', $new{$id}, $newptype{$id}, $oops, $id;
 
 	sub TIEHASH
 	{
@@ -2569,7 +2634,7 @@ sub tied_hash_reference
 				$oops->{oldbig}{$id}{$pkey} = $values->{$pkey};
 				$values->{$pkey} = $oops->load_big($id, $pkey);
 			} else {
-				confess;
+				die;
 			}
 			delete $ptypes->{$pkey};
 		}
@@ -2595,7 +2660,7 @@ sub tied_hash_reference
 			} elsif ($ot eq 'B') {
 				$oops->{oldbig}{$id}{$pkey} = $values->{$pkey};
 			} else {
-				confess;
+				die;
 			}
 			print "%$id/$pkey hSTORE Oldvalue = $qval{$values->{$pkey}}\n" if $debug_normalhash;
 			$oops->{oldvalue}{$id}{$pkey} = $values->{$pkey};
@@ -2632,7 +2697,7 @@ sub tied_hash_reference
 
 				unless (exists $added->{$pkey} || exists $vars->{deleted}{$pkey} || exists $vars->{alldelete}) {
 					print "%*$id/'$pkey' hDELETE preserve $addr ($ref) in original_refs\n" if $debug_memory || $debug_refalias;
-					confess if $vars->{original_reference}{$pkey};
+					die if $vars->{original_reference}{$pkey};
 					$vars->{original_reference}{$pkey} = $ref
 				}
 
@@ -2652,7 +2717,7 @@ sub tied_hash_reference
 					} elsif ($ot eq 'B') {
 						$oops->{oldbig}{$id}{$pkey} = $values->{$pkey};
 					} else {
-						confess;
+						die;
 					}
 					print "%$id/$pkey hDELETE Oldvalue = $qval{$values->{$pkey}}\n" if $debug_normalhash;
 					$oops->{oldvalue}{$id}{$pkey} = $values->{$pkey};
@@ -2681,7 +2746,7 @@ sub tied_hash_reference
 
 		$self->preserve_ptypes;
 
-		confess if %$ptypes;
+		die if %$ptypes;
 		if ($vars->{keyrefs}) {
 			for my $pkey (keys %{$vars->{keyrefs}}) {
 				no warnings qw(uninitialized);
@@ -2693,7 +2758,7 @@ sub tied_hash_reference
 
 				unless (exists $added->{$pkey} || exists $vars->{deleted}{$pkey} || exists $vars->{alldelete}) {
 					print "%*$id/'$pkey' hCLEAR preserve $addr ($ref) in original_refs\n" if $debug_memory || $debug_refalias;
-					confess if $vars->{original_reference}{$pkey};
+					die if $vars->{original_reference}{$pkey};
 					$vars->{original_reference}{$pkey} = $ref
 				}
 			}
@@ -2761,7 +2826,7 @@ sub tied_hash_reference
 		my ($values, $ptypes, $added, $oops, $id, $vars) = @$self;
 		$self->STORE($pkey, $self->FETCH($pkey));
 		no warnings qw(uninitialized);
-		confess unless exists $values->{$pkey};
+		die unless exists $values->{$pkey};
 		$self->LOAD_SELF_REF() unless $vars->{ref_to_self_loaded};
 		my $ref = \$values->{$pkey};
 		$vars->{keyrefs}{$pkey} = $ref;
@@ -2807,7 +2872,7 @@ sub tied_hash_reference
 				} elsif ($ot eq 'B') {
 					$oops->{oldbig}{$id}{$pkey} = $values->{$pkey};
 				} else {
-					confess;
+					die;
 				}
 				print "%$id/$pkey hCLEAR oldvalue = $qval{$values->{$pkey}}\n" if $debug_normalhash;
 				$oops->{oldvalue}{$id}{$pkey} = $values->{$pkey};
@@ -2872,13 +2937,13 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::DemandHash;
+	package OOPS::OOPS1001::DemandHash;
 
 	use Carp qw(confess longmess);
 	use Scalar::Util qw(weaken refaddr);
 
 	#
-	# $oops - OOPS object to use
+	# $oops - OOPS::OOPS1001 object to use
 	# $id - persistant object id
 	# $rcache - read cache
 	# $wcache - write cache
@@ -2908,7 +2973,7 @@ sub tied_hash_reference
 			my %done;
 			for my $pkey (keys %$dcache, keys %$wcache) {
 				no warnings qw(uninitialized);
-				confess if $done{$pkey}++;
+				die if $done{$pkey}++;
 				my ($pval, $ptype);
 				if (exists $ovcache->{$pkey}) {
 					($pval, $ptype) = @{$ovcache->{$pkey}};
@@ -2936,7 +3001,7 @@ sub tied_hash_reference
 					print "%$id/'$pkey' - old value was big\n" if $debug_virtual_delete || $debug_virtual_save; 
 					$oops->query('deletebig', execute => [ $id, $pkey ]);
 				} else {
-					confess;
+					die;
 				}
 				$self->LOAD_SELF_REF($pkey) if exists $dcache->{$pkey} && $oops->{reftarg}{$id};
 			}
@@ -2950,6 +3015,7 @@ sub tied_hash_reference
 		}
 		if (%$wcache) {
 			my $saveattributeQ = $oops->query('saveattribute');
+			local($@);
 			for my $pkey (keys %$wcache) {
 				no warnings qw(uninitialized);
 #				print "%$id/'$pkey' - no change in value\n" if $debug_virtual_save && exists $rcache->{$pkey} && $rcache->{$pkey} eq $wcache->{$pkey} && defined($rcache->{$pkey}) eq defined($wcache->{$pkey}) && ref($rcache->{$pkey}) eq ref($wcache->{$pkey});
@@ -3009,7 +3075,7 @@ sub tied_hash_reference
 
 	sub DESTROY
 	{
-		local($main::SIG{'__DIE__'}) = \&OOPS::die_from_destroy;
+		local($main::SIG{'__DIE__'}) = \&OOPS::OOPS1001::die_from_destroy;
 		my $self = shift;
 		my ($oops, $id, $rcache, $wcache, $necache, $ovcache, $dcache, $vars) = @$self;
 		print "DESTROY DemandHash \%$id $self\n" if $debug_free_tied;
@@ -3130,7 +3196,7 @@ sub tied_hash_reference
 		my ($pval, $ptype) = $self->ORIGINAL_PTYPE($pkey);
 
 		if (! defined $ptype) {
-			confess if defined $pval;
+			die if defined $pval;
 		} elsif ($ptype eq 'B') {
 			print "%*$id/'$pkey' is big\n" if $debug_virtual_hash;
 			$pval = $oops->load_big($id, $pkey);
@@ -3143,7 +3209,7 @@ sub tied_hash_reference
 			# to FETCH.
 			#
 		} elsif ($ptype ne '0') {
-			confess;
+			die;
 		}
 		no warnings qw(uninitialized);
 		print "%*$id/$pkey vORIGINAL_VALUE = $qval{$pval}\n" if $debug_virtual_ovals;
@@ -3454,7 +3520,7 @@ sub tied_hash_reference
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
-	package OOPS::Aware;
+	package OOPS::OOPS1001::Aware;
 
 	# methods to overload...
 
@@ -3465,7 +3531,7 @@ sub tied_hash_reference
 #	-	-	-	-	-	-	-	-	-	-	- 
 
 {
-	package OOPS::FrontEnd;
+	package OOPS::OOPS1001::FrontEnd;
 
 	use Carp qw(longmess);
 	use Scalar::Util qw(refaddr);
@@ -3473,7 +3539,7 @@ sub tied_hash_reference
 	sub new 
 	{
 		my ($pkg, $oops) = @_;
-		tie my %x, 'OOPS::NamedObjects', $oops;
+		tie my %x, 'OOPS::OOPS1001::NamedObjects', $oops;
 		my $self = bless \%x, $pkg;
 
 		#
@@ -3481,7 +3547,7 @@ sub tied_hash_reference
 		# be caught.
 		#
 		$oops->memory($self, 1);
-		print "MEMORY OOPS::FE $qval{$self} := 1\n" if $debug_memory;
+		print "MEMORY OOPS::OOPS1001::FE $qval{$self} := 1\n" if $debug_memory;
 
 		$tiedvars{$self} = __PACKAGE__.longmess if $debug_tiedvars;
 		return $self;
@@ -3491,7 +3557,7 @@ sub tied_hash_reference
 	sub commit		{ my $self = shift; my $tied = tied %$self; $tied->[0]->commit(@_); }
 	sub virtual_object	{ my $self = shift; my $tied = tied %$self; $tied->[0]->virtual_object(@_); }
 	sub workaround27555	{ my $self = shift; my $tied = tied %$self; $tied->[0]->workaround27555(@_); }
-	sub load_object		{ my $self = shift; my $tied = tied %$self; $tied->[0]->load_object(@_); } 
+	sub load_object		{ my $self = shift; my $tied = tied %$self; local($@); eval { $tied->[0]->load_object(@_); } } 
 	sub dbh			{ my $self = shift; my $tied = tied %$self; $tied->[0]->{dbh} }
 
 }
@@ -3499,7 +3565,7 @@ sub tied_hash_reference
 #	-	-	-	-	-	-	-	-	-	-	- 
 
 {
-	package OOPS::NamedObjects;
+	package OOPS::OOPS1001::NamedObjects;
 
 	use Carp qw(longmess);
 	use Scalar::Util qw(refaddr);
@@ -3515,7 +3581,7 @@ sub tied_hash_reference
 		# be caught.
 		#
 		$oops->memory($self, 1);
-		print "MEMORY OOPS::NO $qval{$self} := 1\n" if $debug_memory;
+		print "MEMORY OOPS::OOPS1001::NO $qval{$self} := 1\n" if $debug_memory;
 
 		$tiedvars{$self} = __PACKAGE__.longmess if $debug_tiedvars;
 		return $self;
@@ -3535,6 +3601,11 @@ sub tied_hash_reference
 	sub POST_SAVE	{ my $self = shift; $self->[1]->POST_SAVE(@_) }
 }
 
+#	-	-	-	-	-	-	-	-	-	-	- 
+
+sub OOPS::OOPS1001::debug::TIEHASH { my $p = shift; return bless shift, $p } 
+sub OOPS::OOPS1001::debug::FETCH { my $f = shift; return &$f(shift) } 
+
 1;
 
 __END__
@@ -3542,6 +3613,10 @@ __END__
 TODO:
 
 remove $oops->{loaded}?
+
+fix the NOT NULL issue in mysql
+
+test the schema version
 
 TEST:
 

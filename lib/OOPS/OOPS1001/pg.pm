@@ -1,7 +1,7 @@
 
-package OOPS::pg;
+package OOPS::OOPS1001::pg;
 
-@ISA = qw(OOPS);
+@ISA = qw(OOPS::OOPS1001);
 
 use strict;
 use warnings;
@@ -123,8 +123,10 @@ sub query
 	confess unless $query = $oops->{queries}{$q};
 	$query =~ s/TP_/$oops->{table_prefix}/g;
 
+	local($@);
 	my $dbh = $args{dbh} || $oops->{dbh};
-	my $sth = $dbh->prepare_cached($query, undef, 3) || die $dbh->errstr;
+	my $sth = eval { $dbh->prepare_cached($query, undef, 3) } || die $dbh->errstr;
+	die $@ if $@;
 
 	if (exists $args{execute}) {
 		my @a = defined($args{execute})
@@ -142,10 +144,11 @@ sub query
 					$sth->bind_param($i+1, $a[$i]);
 				}
 			}
-			$sth->execute() || confess "could not execute '$query' with '@a':".$sth->errstr;
+			eval { $sth->execute() } || confess "could not execute '$query' with '@a':".$sth->errstr;
 		} else {
-			$sth->execute(@a) || confess "could not execute '$query' with '@a':".$sth->errstr;
+			eval { $sth->execute(@a) } || confess "could not execute '$query' with '@a':".$sth->errstr;
 		}
+		die $@ if $@;
 	}
 
 	return $sth;
@@ -173,17 +176,17 @@ sub allocate_id
 	my $id;
 	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
 		$id = $oops->{id_pool_start}++;
-		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, allocating $id from pool\n" if $OOPS::OOPS1001::debug_object_id;
 	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::id_alloc_size);
+		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::OOPS1001::id_alloc_size);
 		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
 		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
 		$get_idQ->finish;
 		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
+		$oops->{id_pool_end} = $id+$OOPS::OOPS1001::id_alloc_size;
 		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
-		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::OOPS1001::debug_object_id;
+		print "in allocate_id, allocated $id from before pool\n" if $OOPS::OOPS1001::debug_object_id;
 	}
 	return $id;
 }
@@ -197,7 +200,7 @@ sub post_new_object
 sub byebye
 {
 	my $oops = shift;
-	$oops->{counterdbh}->disconnect() if $oops->{counterdbh};
+	eval { $oops->{counterdbh}->disconnect() if $oops->{counterdbh} };
 }
 
 1;

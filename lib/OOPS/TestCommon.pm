@@ -33,6 +33,7 @@ package OOPS::TestCommon;
 	runtest
 	russian_roulette
 	wa
+	db_drop
 	supercross1
 	rvsamesame
 	ref2string
@@ -42,6 +43,7 @@ package OOPS::TestCommon;
 	$multiread
 	$Npossible
 	$Nvert
+	%args
 	);
 @ISA = qw(Exporter);
 
@@ -56,6 +58,7 @@ BEGIN {
 }
 
 use OOPS;
+use OOPS::Setup;
 import Clone::PP qw(clone); 
 use Carp qw(confess);
 use Scalar::Util qw(reftype refaddr);
@@ -114,7 +117,7 @@ delete $SIG{__DIE__};
 
 our $basecount;
 
-our $dbms = OOPS->initial_setup(%args) || die;
+our $dbms = OOPS->initial_setup(%args) || confess;
 
 $OOPS::bigcutoff = 50;
 $OOPS::sqlite::big_blob_size = 60;
@@ -301,7 +304,7 @@ sub qcheck
 {
 	my ($q, $picture, @extra) = @_;
 	$q =~ s/TP_/$args{table_prefix}/g;
-	die "pict:'$picture'" unless $picture =~ /\A(\s+)\+([-+]+)\+\n/;
+	confess "pict:'$picture'" unless $picture =~ /\A(\s+)\+([-+]+)\+\n/;
 	my $ws = $1;
 	my $fp = $2;
 	my (@fl) = map { length($_) - 1} split(/\+/, $fp);
@@ -323,9 +326,9 @@ sub qcheck
 		#print "row = @row\n";
 		$rows{join(",", @row)}++;
 	}
-	my $dbh = OOPS->dbiconnect(%args) || die;
-	my $sth = $dbh->prepare($q) || die;
-	$sth->execute(@extra) || die;
+	my $dbh = OOPS->dbiconnect(%args) || confess;
+	my $sth = $dbh->prepare($q) || confess;
+	$sth->execute(@extra) || confess;
 	my (@a);
 	while (@a = $sth->fetchrow_array()) {
 		$rows{join(",", @a)}--;
@@ -384,13 +387,13 @@ sub rowcount
 	@tables = split(" ", $t)
 		unless @tables;
 
-	my $dbh = OOPS->dbiconnect(%args) || die;
+	my $dbh = OOPS->dbiconnect(%args) || confess;
 	my $c = 0;
 	my $s = '';
 	for my $t (@tables) {
 		my $sth = eval { $dbh->prepare("select count(*) from $t");};
 		confess $@ if $@;
-		$sth->execute() || die $sth->errstr;
+		$sth->execute() || confess $sth->errstr;
 		my ($count) = $sth->fetchrow_array();
 		$c += $count;
 		$s .= " $t:$count";
@@ -398,6 +401,23 @@ sub rowcount
 	}
 	$dbh->disconnect;
 	return "$c$s";
+}
+
+sub db_drop
+{
+	if ($test_dsn =~ m{^DBI:SQLite:dbname=(/tmp/OOPStest.\d+.db)$}) {
+		unlink($1);
+	} else {
+		eval {
+			OOPS->db_domany(\%OOPS::TestCommon::args, <<END);
+				DROP TABLE TP_object;
+				DROP TABLE TP_attribute;
+				DROP TABLE TP_big;
+END
+		};
+		eval { OOPS->db_domany(\%OOPS::TestCommon::args, "DROP TABLE TP_counters") }
+			unless $dbms eq 'sqlite';
+	}
 }
 
 sub resetall
@@ -428,7 +448,7 @@ sub resetall
 	$basecount = rowcount() unless defined $basecount;
 	nodata();
 
-	$r1 = OOPS->new(%args) || die;
+	$r1 = OOPS->new(%args) || confess;
 	$fe = OOPS::FrontEnd->new($r1);
 }
 
@@ -436,7 +456,7 @@ sub groupmangle
 {
 	my ($action) = @_;
 
-	my $r = OOPS->new(%args) || die;
+	my $r = OOPS->new(%args) || confess;
 	my $dbh = $r->{dbh};
 
 	my $q;
@@ -454,7 +474,7 @@ END
 
 END
 	} else {
-		die;
+		confess;
 	}
 	$q->execute();
 }
@@ -469,23 +489,23 @@ sub AUTODISC::DESTROY
 sub check_refcount
 {
 	my ($msg, $die) = @_;
-	my $dbh = OOPS->dbiconnect(%args) || die;
+	my $dbh = OOPS->dbiconnect(%args) || confess;
 	my $autodisc = bless { dbh => $dbh }, 'AUTODISC';
 	my $error = 0;
 	my $aq = "SELECT pval, count(*) FROM TP_attribute WHERE ptype = 'R' GROUP BY pval";
 	$aq =~ s/TP_/$args{table_prefix}/g;
 	my $rq = "SELECT id, refs FROM TP_object";
 	$rq =~ s/TP_/$args{table_prefix}/g;
-	my $actual = $dbh->prepare($aq) || die $dbh->errstr;
-	$actual->execute() || die $actual->errstr;
+	my $actual = $dbh->prepare($aq) || confess $dbh->errstr;
+	$actual->execute() || confess $actual->errstr;
 	my (%actual, %recorded);
 	my ($id, $count);
 	while (($id, $count) = $actual->fetchrow_array()) {
 		$actual{$id} = $count;
 	}
 	$actual->finish;
-	my $recorded = $dbh->prepare($rq) || die $dbh->errstr;
-	$recorded->execute() || die $recorded->errstr;
+	my $recorded = $dbh->prepare($rq) || confess $dbh->errstr;
+	$recorded->execute() || confess $recorded->errstr;
 	while (($id, $count) = $recorded->fetchrow_array()) {
 		$recorded{$id} = $count;
 	}
@@ -540,14 +560,14 @@ sub rcon
 		unless $skipref;
 	notied('at reset', $line)
 		unless $skipref;
-	$r1 = OOPS->new(%args) || die;
+	$r1 = OOPS->new(%args) || confess;
 	$fe = OOPS::FrontEnd->new($r1);
 }
 
 sub rcon12
 {
 	rcon(($_[0] || 0)+1);
-	$r2 = OOPS->new(%args) || die;
+	$r2 = OOPS->new(%args) || confess;
 }
 
 our $Nvert;
@@ -667,17 +687,17 @@ sub runtests
 			my @tested;
 			my @test;
 			my (@nv) = (@variables[0..($vi-1)], \@test, @variables[($vi+1)..$#variables]);
-			die unless $#nv == $inv;
-			die if grep (! (ref $_ eq 'ARRAY'), @nv);
+			confess unless $#nv == $inv;
+			confess if grep (! (ref $_ eq 'ARRAY'), @nv);
 			for(;;) {
 				last unless @found > 1;
 				@test = @found[0..int(($#found)/2)];
-				die unless @test;
+				confess unless @test;
 				last unless @test;
 				my (@untest) = @found[int(($#found)/2)+1 .. $#found];
-				die unless @untest;
-				die unless $#nv == $inv;
-				die if grep (! (ref $_ eq 'ARRAY'), @nv);
+				confess unless @untest;
+				confess unless $#nv == $inv;
+				confess if grep (! (ref $_ eq 'ARRAY'), @nv);
 				$r = runtest($setup, $modify, $line, @nv);
 				if ($r) {
 					# winner
@@ -689,9 +709,9 @@ sub runtests
 				@test = @untest;
 				last unless @test;
 				@untest = @tmp;
-				die unless @untest;
-				die unless $#nv == $inv;
-				die if grep (! (ref $_ eq 'ARRAY'), @nv);
+				confess unless @untest;
+				confess unless $#nv == $inv;
+				confess if grep (! (ref $_ eq 'ARRAY'), @nv);
 				$r = runtest($setup, $modify, $line, @nv);
 				if ($r) {
 					# winner
@@ -702,8 +722,8 @@ sub runtests
 				last;
 			}
 			@variables = (@variables[0..($vi-1)], \@found, @variables[($vi+1)..$#variables]);
-			die unless $#variables == $inv;
-			die if grep (! (ref $_ eq 'ARRAY'), @variables);
+			confess unless $#variables == $inv;
+			confess if grep (! (ref $_ eq 'ARRAY'), @variables);
 		}
 	}
 	print "----------------------------- simplest run ---------------------------------------------\n";
@@ -788,7 +808,7 @@ $$sr .= "(noting '$x')" if $main::xy;
 			$$sr .= "\\";
 			&bad_dump($sr,$$x,$indent+1, %done);
 		} else {
-			die;
+			confess;
 		}
 		if (ref($x) ne reftype($x)) {
 			$$sr .= ", ".&quote(ref($x));
@@ -840,7 +860,7 @@ sub nukevar
 			nukevar($$x);
 			$x = undef;
 		} else {
-			die;
+			confess;
 		}
 	}
 }
@@ -860,12 +880,12 @@ sub supercross1
 		my (@func);
 		for my $t (@tests) {
 			eval "push(\@func, sub { my (\$root, \$subtest, \$subtest2, \$subtest3) = \@_; $t })";
-			die "eval test $number: <<$t>>of<$test>: $@" if $@;
+			confess "eval test $number: <<$t>>of<$test>: $@" if $@;
 		}
 		my $pre;
 		if ($conf{E}) {
 			eval "\$pre = sub { my \$root = shift; @{$conf{E}} }";
-			die "eval <<@{$conf{E}}>>of<$test>: $@" if $@;
+			confess "eval <<@{$conf{E}}>>of<$test>: $@" if $@;
 		}
 
 		my (@virt) = defined $conf{V}

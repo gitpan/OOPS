@@ -1,7 +1,7 @@
 
-package OOPS::mysql;
+package OOPS::OOPS1001::mysql;
 
-@ISA = qw(OOPS);
+@ISA = qw(OOPS::OOPS1001);
 
 use strict;
 use warnings;
@@ -44,7 +44,7 @@ sub tabledefs
 
 	CREATE TABLE TP_attribute (
 		id		BIGINT NOT NULL, 
-		pkey		VARCHAR(255) BINARY,
+		pkey		VARCHAR(255) BINARY NOT NULL, 	# not null is a bug but doesn't manifest
 		pval		VARCHAR(255) BINARY, 
 		ptype		CHAR(1),
 		PRIMARY KEY	(id, pkey),
@@ -53,7 +53,7 @@ sub tabledefs
 
 	CREATE TABLE TP_big (
 		id		BIGINT NOT NULL, 
-		pkey		VARCHAR(255) BINARY,
+		pkey		VARCHAR(255) BINARY NOT NULL, 	# not null is a bug but doesn't manifest
 		pval		LONGBLOB,
 		PRIMARY KEY	(id, pkey))
 				TYPE = InnoDB;
@@ -111,17 +111,17 @@ sub allocate_id
 	my $id;
 	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
 		$id = $oops->{id_pool_start}++;
-		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, allocating $id from pool\n" if $OOPS::OOPS1001::debug_object_id;
 	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::id_alloc_size);
+		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::OOPS1001::id_alloc_size);
 		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
 		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
 		$get_idQ->finish;
 		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
+		$oops->{id_pool_end} = $id+$OOPS::OOPS1001::id_alloc_size;
 		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
-		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::OOPS1001::debug_object_id;
+		print "in allocate_id, allocated $id from before pool\n" if $OOPS::OOPS1001::debug_object_id;
 	}
 	return $id;
 }
@@ -135,7 +135,7 @@ sub post_new_object
 sub byebye
 {
 	my $oops = shift;
-	$oops->{counterdbh}->disconnect() if $oops->{counterdbh};
+	eval { $oops->{counterdbh}->disconnect() if $oops->{counterdbh} };
 }
 
 

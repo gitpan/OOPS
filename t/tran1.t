@@ -104,19 +104,21 @@ ab:
 	for(;;) {
 		my $try = 0;
 		my $done = 1;
-		# print STDERR "# top of loop [$pn]\n" if $debug;
+		print STDERR "# top of loop [$pn]\n" if $debug;
 ab:
+		print STDERR "# running [$pn]\n" if $debug;
 		rcon;
 		eval {
 			$common = getcommon;
 			for my $names (keys %$common) {
+				print STDERR "# common->{$names} = '$common->{names}' [$pn]\n" if $debug;
 				next if $common->{$names};
 				$try = 1 if $names eq $pn;	# if we haven't done it yet
 				$done = 0;			# someone hasn't finished yet
 			}
 
 			if ($try) {
-				# print STDERR "# trying...  setting d -> x$$ [$pn]\n" if $debug;
+				print STDERR "# trying...  setting d -> x$$ [$pn]\n" if $debug;
 				$r1->{named_objects}{root}{d} = "x$$";
 				$r1->{named_objects}{root}{$pn} = "x$$";
 				$r1->commit;
@@ -124,26 +126,34 @@ ab:
 			$r1->DESTROY();
 		};
 		nocon;
+		print STDERR "# eval done [$pn]\n" if $debug;
+ab:
+		print STDERR "# recording results [$pn]\n" if $debug;
 		last if $done;
 		if ($@) {
 			if ($@ =~ /$transfailrx/) {
-				# print STDERR "# locking failure, must try again [$pn]\n";
+				print STDERR "# locking failure, must try again [$pn]\n";
 			} else {
-				print "\nBail out! -- $@\n" if $@ && $@ 
+				my $x = $@;
+				$x =~ s/\n/  /g;
+				print "\nBail out! -- '$x'\n";
 			}
 		} elsif ($try) {
-			# print STDERR "# sucess! marking as done [$pn]\n" if $debug;
+			print STDERR "# sucess! marking as done [$pn]\n" if $debug;
 			lockcommon();
 			$common = getcommon;
 			$common->{$pn} = 1;
 			setcommon($common);
 			unlockcommon();
+			print STDERR "# common unlocked [$pn]\n" if $debug;
 		} else {
 			print STDERR "# already done, waiting for peers [$pn]\n" if $debug;
 		}
 	}
 	nocon;
+	print STDERR "# at bottom [$pn]\n" if $debug;
 ab:
+	print STDERR "# past wait at bottom [$pn]\n" if $debug;
 	rcon;
 	my $r = $r1->{named_objects}{root};
 	test($r->{d}, "a victor: $r->{d}");

@@ -120,6 +120,7 @@ ab:
 			}
 			$r1->DESTROY();
 		};
+ab:
 		last if $done;
 		if ($@) {
 			if ($@ =~ /$transfailrx/) {

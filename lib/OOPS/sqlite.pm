@@ -18,12 +18,12 @@ sub initialize
 	my $dbh = $oops->{dbh};
 	$dbh->{sqlite_handle_binary_nulls} = 1;
 
-	if ($oops->{args}{default_synchronous}) {
-		my $sm = $dbh->prepare("PRAGMA default_synchronous = $oops->{args}{default_synchronous};") || die;
-		$sm->execute || die $sm->errstr;
+	if ($oops->{args}{default_synchronous} || $ENV{OOPS_SYNC}) {
+		my $sm = $dbh->prepare("PRAGMA default_synchronous = $oops->{args}{default_synchronous};") || confess $dbh->errstr;
+		$sm->execute || confess $sm->errstr;
 	}
 
-	#my $tmode = $dbh->prepare('END TRANSACTION; BEGIN TRANSACTION ON CONFLICT ROLLBACK') || die;
+	#my $tmode = $dbh->prepare('END TRANSACTION; BEGIN TRANSACTION ON CONFLICT ROLLBACK') || confess;
 	#$tmode->execute() || die $tmode->errstr;
 }
 
@@ -117,7 +117,7 @@ sub load_big
 {
 	my ($oops, $id, $pkey) = @_;
 	my $bigloadQ = $oops->query('bigload');
-	$bigloadQ->execute($id, $pkey) || die $bigloadQ->errstr()." ";
+	$bigloadQ->execute($id, $pkey) || confess $bigloadQ->errstr()." ";
 	my $val;
 	my ($frag, $fragno);
 	while (($frag, $fragno) = $bigloadQ->fetchrow_array()) {
@@ -135,7 +135,7 @@ sub save_big
 	my $pkey = shift;
 	my $savebigQ = $oops->query('savebig');
 	for (my $fragno = 0; $fragno * $big_blob_size < length($_[0]); $fragno++) {
-		$savebigQ->execute($id, $pkey, $fragno, substr($_[0], $fragno * $big_blob_size, $big_blob_size)) || die;
+		$savebigQ->execute($id, $pkey, $fragno, substr($_[0], $fragno * $big_blob_size, $big_blob_size)) || confess;
 	}
 }
 
@@ -149,44 +149,4 @@ sub update_big
 }
 
 1;
-
-__END__
-
- 
- $dbh->func('last_insert_rowid')
-
-
- Remember, SQLite is typeless. A VARCHAR column can hold as much data as any other column. The total amount of data in a single row of the database is limited to 1 megabyte. You can increase this limit to 16 megabytes, if you need to, by adjusting a single #define in the source tree and recompiling.
-
-  
-
-  For maximum speed and space efficiency, you should try to keep the amount of data in a single row below about 230 bytes.
-
-   
-
-   You can declare a table column to be of type "BLOB" but it will still only store null-terminated strings. This is because the only way to insert information into an SQLite database is using an INSERT SQL statement, and you can not include binary data in the middle of the ASCII text string of an INSERT statement.
-
-
-
-SQLite is 8-bit clean with regard to the data it stores as long as the data does not contain any '\000' characters. If you want to store binary data, consider encoding your data in such a way that it contains no NUL characters and inserting it that way. You might use URL-style encoding: encode NUL as "%00" and "%" as "%25". Or, you might consider encoding your binary data using base-64. There is a source file named "src/encode.c" in the SQLite distribution that contains implementations of functions named "sqlite_encode_binary() and sqlite_decode_binary() that can be used for converting binary data to ASCII and back again, if you like.
-
-sub allocate_id
-{
-	my $oops = shift;
-	my $id;
-	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
-		$id = $oops->{id_pool_start}++;
-		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
-	} else {
-		my $allocate_idQ = $oops->query('allocate_id', execute => $OOPS::id_alloc_size);
-		my $get_idQ = $oops->query('get_id', execute => []);
-		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
-		$get_idQ->finish;
-		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
-		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
-	}
-	return $id;
-}
 

@@ -5,8 +5,15 @@ lib/OOPS.pod
 lib/OOPS/mysql.pm
 lib/OOPS/pg.pm
 lib/OOPS/sqlite.pm
+lib/OOPS/Setup.pm
 lib/OOPS/TestCommon.pm
+lib/OOPS/OOPS1001.pm
+lib/OOPS/OOPS1001/mysql.pm
+lib/OOPS/OOPS1001/pg.pm
+lib/OOPS/OOPS1001/sqlite.pm
+lib/OOPS/Upgrade/To1003.pm
 t/ab-loopspeed.t
+t/auto_init.t
 t/blobsize.t
 t/bug-array.t
 t/bug-refs.t
@@ -16,13 +23,7 @@ t/hash.t
 t/integrety.t
 t/misc.t
 t/ndb-front_end.t
-t/ndb-hash.t
 t/ndb-integrety.t
-t/ndb-misc.t
-t/ndb-ref.t
-t/ndb-ref2.t
-t/ndb-scalarhash.t
-t/ndb-z-array.t
 t/nulls.t
 t/perlworks.t
 t/perlworks2.t
@@ -38,6 +39,7 @@ t/tran3.t
 t/tran4.t
 t/tran5.t
 t/tran5a.t
+t/upgrade1001.t
 t/z-array.t
 t/zzz-drop.t
 CHANGELOG
