@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -31,6 +31,7 @@ use diagnostics;
 
 use OOPS::TestCommon;
 
+modern_data_compare();
 
 print "1..2204\n";
 
@@ -137,7 +138,7 @@ END
 	$r1->commit;
 	nocon;
 
-	my $oi = $dbms eq 'sqlite' ? 101 : 111;
+	my $oi = ($dbms =~ /sqlite/) ? 101 : 111;
 
 	qcheck "select * from TP_attribute where id != 2", <<END;
 		+-----+----------+------+-------+
@@ -761,7 +762,7 @@ resetall; # --------------------------------------------------
 
 	my (@k) = sort keys %{$r1->load_object(2)};
 	my @kk;
-	if ($dbms eq 'sqlite') {
+	if ($dbms =~ /sqlite/) {
 		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'last reserved object id', 'user objects');
 	} else {
 		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'user objects');

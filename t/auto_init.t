@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I.. 
+#!/usr/bin/perl -I../lib -I.. 
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1

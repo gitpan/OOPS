@@ -1,20 +1,9 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
 }
-BEGIN {
-	for my $m (qw(Data::Dumper Clone::PP)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
-
-import Clone::PP qw(clone);
 
 use OOPS qw($transfailrx);
 use Carp qw(confess);
@@ -22,24 +11,33 @@ use Scalar::Util qw(reftype);
 use strict;
 use warnings;
 use diagnostics;
+
 use OOPS::TestCommon;
+use Clone::PP qw(clone);
+modern_data_compare();
 
-if ($dbms eq 'sqlite') {
-	print "1..0 # Skipped: this test requires simultanous access\n";
-	exit;
+BEGIN	{
+	if ($dbms =~ /sqlite/) {
+		print "1..0 # Skipped: this test not supported on $dbms\n";
+		exit;
+	}
+
+	unless (eval { require Test::MultiFork }) {
+		print "1..0 # Skipped: this test requires Test::MultiFork\n";
+	}
+
+	$Test::MultiFork::inactivity = 60; 
+	import Test::MultiFork qw(stderr bail_on_bad_plan);
 }
-
-use Test::MultiFork qw(stderr bail_on_bad_plan);
-import Test::MultiFork qw(colorize)
-	if -t STDOUT;
-
-
 
 # 
 # This forces a deadlock and then simulates the
 # retry that would normally be handled by 
 # transaction()
 #
+
+my $itarations = 200;
+$itarations /= 10 unless $ENV{OOPSTEST_SLOW};
 
 my $common;
 
@@ -59,7 +57,7 @@ unlockcommon;
 ab:
 
 # --------------------------------------------------
-for my $x (1..200) {
+for my $x (1..$itarations) {
 a:
 	print "\n\n\n\n\n\n\n\n\n\n" if $debug;
 	resetall; 

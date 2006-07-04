@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -32,6 +32,7 @@ use diagnostics;
 
 use OOPS::TestCommon;
 
+modern_data_compare();
 print "1..1691\n";
 
 resetall; # --------------------------------------------------

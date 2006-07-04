@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 use warnings;
 use strict;
@@ -8,7 +8,7 @@ use strict;
 #
 
 use Scalar::Util qw(refaddr reftype blessed);
-use Test::More tests => 84;
+use Test::More tests => 85;
 
 #
 # I can't find a case where a delete doesn't
@@ -610,26 +610,30 @@ print "# block at ".__LINE__."\n";
 
 print "# block at ".__LINE__."\n";
 {
-	sub x19 {
-		eval { &y19(); };
-		TODO: {
-			local $TODO = 'nested evals are hiding the exception return';
-			ok($@ eq 'foo4:foo2');
-		}
+	sub a10 {
+		local($@);
+		die "foobar\n";
 	}
-	sub y19 {
-		&z19();
+	eval { &a10(); };
+	TODO: {
+		local $TODO = 'local($@) is hiding the exception return';
+		ok($@ eq "foobar\n");
 	}
-	sub z19 {
-		my $x;
-		eval { $x = 7 };
-		eval { $x = 'foo2'; die "foo3\n" } || die "foo4:$x\n";
-		die $@ if $@;
-	}
-	&x9();
 }
 
-
+print "# block at ".__LINE__."\n";
+{
+	sub a11 {
+		local($@);
+		eval { my $x };
+		die "foobar2\n";
+	}
+	eval { &a11(); };
+	TODO: {
+		local $TODO = 'local($@) is hiding the exception return';
+		ok($@ eq "foobar2\n");
+	}
+}
 
 {
 package ScalarInc;

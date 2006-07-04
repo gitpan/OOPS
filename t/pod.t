@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 use Test::More;
 eval "use Test::Pod 1.00";

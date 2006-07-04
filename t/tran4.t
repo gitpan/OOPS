@@ -1,20 +1,10 @@
-#!/home/muir/bin/perl -I../lib -I.. -I.
+#!/usr/bin/perl -I../lib -I.. -I.
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
 }
-BEGIN {
-	for my $m (qw(Data::Dumper Clone::PP)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
 
-import Clone::PP qw(clone);
 
 use OOPS qw($transfailrx);
 use Carp qw(confess);
@@ -23,14 +13,25 @@ use strict;
 use warnings;
 use diagnostics;
 use OOPS::TestCommon;
+use Clone::PP qw(clone);
 
-BEGIN { $Test::MultiFork::inactivity = 60; }
-use Test::MultiFork qw(stderr bail_on_bad_plan);
-import Test::MultiFork qw(colorize)
-	if -t STDOUT;
+modern_data_compare();
 
+BEGIN {
+	$Test::MultiFork::inactivity = 60;
+
+	unless (eval { require Test::MultiFork }) {
+		print "1..0 # Skipped: this test requires Test::MultiFork\n";
+	}
+
+	$Test::MultiFork::inactivity = 60; 
+	import Test::MultiFork qw(stderr bail_on_bad_plan);
+}
 
 $debug = 0;
+
+my $itarations = 200;
+$itarations /= 10 unless $ENV{OOPSTEST_SLOW};
 
 #
 # This tests for transaction isolation levels.
@@ -55,7 +56,7 @@ b:
 
 ab:
 
-for my $x (0..200) {
+for my $x (0..$itarations) {
 a:
 	print "\n\n\n\n\n\n\n\n\n\n" if $debug;
 	resetall; 

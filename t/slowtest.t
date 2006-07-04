@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I./..
 
 
 BEGIN {
@@ -20,6 +20,7 @@ BEGIN {
 }
 
 use OOPS;
+require Carp::Heavy;
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
 use strict;
@@ -31,6 +32,7 @@ import Clone::PP qw(clone);
 
 my $skipto = 0;
 
+modern_data_compare();
 print "1..245574\n";
 my $debug2 = 1;
 my $debug3 = 0;
@@ -49,6 +51,7 @@ END
 	#	v - replace $pval with potential values
 	#
 	my $tests = <<'END';
+
 		- my $zz = 7
 
 		- @{$root->{akey}} = ()
@@ -383,6 +386,7 @@ END
 			}
 			print "# okay: $okay expected2: $expected2\n";
 			die "bad prediction" if $debug && $okay != $expected2;
+			check_resources();
 		}
 		print "# okay: $okay expected: $expected\n";
 		die "bad prediction" if $debug && $okay != $expected;

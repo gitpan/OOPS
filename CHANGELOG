@@ -1,4 +1,60 @@
 
+2006/07/04 0.1004 - focus on: bugfixes, PostgreSQL schema change, SQLite2 vs SQLite 3
+
+	Change the license to GPL.
+
+	This release tested on:
+
+		perl 5.8.7, PostgreSQL 8.1.4, Ubuntu 6.06LTS (Dapper Drake)
+
+		perl 5.8.7, DBD::SQLite2 0.33 (sqlite 2.8.15), Ubuntu 6.06LTS (Dapper Drake)
+
+		perl 5.8.7, mysql 4.1.15, Ubuntu 6.06LTS (Dapper Drake)
+
+	Not supported (did not pass tests):
+
+		perl 5.8.7, DBD::SQLite 1.12 (sqlite 3.2.7), Ubuntu 6.06LTS (Dapper Drake)
+
+	New features:
+		
+		none
+
+	Bugfixes:
+
+		References to hash keys where the key is a large string now work
+		(except when using mysql).
+
+		Change one column definition in the PostgreSQL schema.   This
+		fixes a PostgreSQL compatability bug and this change is required
+		whem moving from PostgreSQL 7.* to PostgreSQL 8.*.  Reported
+		by Jon Schindler.  http://rt.cpan.org/Ticket/Display.html?id=19723
+
+		Bugfix: schema upgrades from 1001 to 1003 weren't always recorded
+		correctly.
+
+		Don't fail tests if Test::MultiFork isn't installed.
+
+		SQLite 3 wouldn't auto-initialize.
+
+		SQLite 3 gives different error messages and that caused errors
+		rather than raising a deadlock exception.
+
+		Old versions of Data::Compare will recursse infinately.  Don't
+		even try!  Unfortunantly Debian (and Ubuntu) include very old
+		versions of Data::Compare.
+
+	Other changes:
+
+		Ran ispell on OOPS.pod and made other edits.
+
+		Added new tests (misc2.t, big.t, upgrade1003.t, failures.t)
+
+		Added a new test harness: supercross7()
+
+		Added support for DBD::SQLite2, auto-detect SQLite version.
+
+		Dropped ab-loopspeed.t in favor of Time::HiRes.
+
 2004/05/19 0.1003 - focus on: new features
 
 	Added hooks to upgrade the schema when the schema is changed and

@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -16,7 +16,8 @@ use strict;
 use warnings;
 use diagnostics;
 
-print "1..311800\n";
+modern_data_compare();
+print "1..299227\n";
 
 sub selector {
 	my $number = shift;
@@ -25,22 +26,6 @@ sub selector {
 }
 
 my $FAIL = <<'END';
-	#
-	# This fails because we don't keep the bless 
-	# information with the scalar but rather with the
-	# ref.
-	#
-	$root->{x} = 'foobar';
-	$root->{y} = \$root->{x};
-	wa($root->{y});
-	bless $y, 'baz';
-	---
-	$root->{y} = 7;
-	---
-	$root->{y} = \$root->{x};
-	wa($root->{y});
-
-
 END
 my $tests = <<'END';
 	%$root = ();
@@ -122,19 +107,6 @@ my $tests = <<'END';
 	---
 	${$root->{eref77}} = getref(%$root, 'fo77');
 	$root->{fo77} = 'seeme77';
-	---
-	if ($subtest2) { delete $root->{hkey} } else { delete $root->{hkey}{$subtest} }
-
-	T=skey2 newkey
-	U=0 1
-	delete $root->{akey};
-	delete $root->{rkey};
-	delete $root->{skey};
-	$root->{hkey}{$subtest} = getref(%{$root->{hkey}}, $subtest);
-	---
-	$root->{eref91} = $root->{hkey}{$subtest};
-	---
-	${$root->{eref91}} = getref(%$root, 'fo91');
 	---
 	if ($subtest2) { delete $root->{hkey} } else { delete $root->{hkey}{$subtest} }
 

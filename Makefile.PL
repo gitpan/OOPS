@@ -21,12 +21,18 @@ WriteMakefile(
 package MY;
 
 sub postamble {
-    <<"END_OF_POSTAMBLE";
+    <<'END_OF_POSTAMBLE';
 
 pm_to_blib: README
 
 README: lib/OOPS.pod
-\tpod2text lib/OOPS.pod >README
+	pod2text lib/OOPS.pod >README
+
+test-all:; env OOPS_SLOWTEST=yes $(MAKE) test
+
+test-tran:; env OOPS_SLOWTEST=yes $(MAKE) TEST_FILES=t/tran*.t test
+
+test-basic:; env OOPS_SLOWTEST=yes $(MAKE) TEST_FILES="t/auto_init.t t/misc2.t t/tran1.t t/zzz-drop.t" test
 
 END_OF_POSTAMBLE
 }

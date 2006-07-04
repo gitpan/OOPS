@@ -1,14 +1,14 @@
 
-package OOPS::pg;
+package OOPS::OOPS1003::pg;
 
-@ISA = qw(OOPS);
+@ISA = qw(OOPS::OOPS1003);
 
 use strict;
 use warnings;
 use Carp qw(confess);
 
 BEGIN {
-	Filter::Util::Call::filter_add(\&OOPS::SelfFilter::filter)
+	filter_add(bless [], 'OOPS::SelfFilter')
 		unless $OOPS::SelfFilter::defeat;
 }
 
@@ -71,7 +71,7 @@ sub tabledefs
 	CREATE TABLE TP_big (
 		id		BIGINT NOT NULL, 
 		pkey		BYTEA,
-		pval		BYTEA,
+		pval		TEXT,
 		PRIMARY KEY (id, pkey));
 
 	CREATE TABLE TP_counters (
@@ -108,14 +108,14 @@ sub initial_query_set
 			FROM TP_counters
 			WHERE name = 'objectid'
 		bigload: 2
-			SELECT pval FROM TP_big 
+			SELECT DECODE(pval, 'escape') FROM TP_big 
 			WHERE id = ? AND pkey = ?
 		savebig: 2 3
 			INSERT INTO TP_big 
-			VALUES (?, ?, ?)
+			VALUES (?, ?, ENCODE(?, 'escape'))
 		updatebig: 1 3
 			UPDATE TP_big
-			SET pval = ?
+			SET pval = ENCODE(?, 'escape')
 			WHERE id = ? AND pkey = ?
 END
 }
@@ -126,13 +126,18 @@ sub query
 
 	my $query;
 	confess unless $query = $oops->{queries}{$q};
-
 	$query =~ s/TP_/$oops->{table_prefix}/g;
 
-	$oops->query_debug('pg', $q, %args);
+	my $debug_match = $query =~ /$OOPS::debug_q_regex/ 
+		|| $oops->{debug_q}{$q} =~ /$OOPS::debug_q_regex/;
 
 	my $dbh = $args{dbh} || $oops->{dbh};
 	my $sth = $dbh->prepare_cached($query, undef, 3) || die $dbh->errstr;
+
+	print STDERR "Q1003: $q\n" if ($OOPS::debug_queries & 2) 
+		&& (($OOPS::debug_queries & 1) || $debug_match);
+	print STDERR "Q1003: $query" if ($OOPS::debug_queries & 4) 
+		&& (($OOPS::debug_queries & 1) || $debug_match);
 
 	if (exists $args{execute}) {
 		my @a = defined($args{execute})
@@ -141,7 +146,6 @@ sub query
 				: $args{execute})
 			: ();
 
-		my $e;
 		if ($oops->{binary_params}{$q}) {
 			for (my $i = 0; $i <= $#a; $i++) {
 				if ($oops->{binary_params}{$q}[$i+1]) {
@@ -151,14 +155,15 @@ sub query
 					$sth->bind_param($i+1, $a[$i]);
 				}
 			}
-			$sth->execute() or $e = "Could Not Execute '$query' with '@a':" . ($sth->errstr);
+			$sth->execute() || confess "could not execute '$query' with '@a':".$sth->errstr;
 		} else {
-			$sth->execute(@a) or $e = "could not execute '$query' with '@a':".$sth->errstr;
+			$sth->execute(@a) || confess "could not execute '$query' with '@a':".$sth->errstr;
 		}
-		if ($e) {
-			$e =~ s/\n/\\n /g; # debug
-			confess($e);
-		}
+		print STDERR "A1003: ".join(',', $q, @a)."\n" if ($OOPS::debug_queries & 8) 
+			&& (($OOPS::debug_queries & 1) || $debug_match);
+	} else {
+		print STDERR "A1003: ".join(',', $q, '-none-')."\n" if ($OOPS::debug_queries & 8) 
+			&& (($OOPS::debug_queries & 1) || $debug_match);
 	}
 
 	return $sth;
@@ -186,17 +191,17 @@ sub allocate_id
 	my $id;
 	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
 		$id = $oops->{id_pool_start}++;
-		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, allocating $id from pool\n" if $OOPS::OOPS1003::debug_object_id;
 	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::id_alloc_size);
+		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::OOPS1003::id_alloc_size);
 		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
 		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
 		$get_idQ->finish;
 		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
+		$oops->{id_pool_end} = $id+$OOPS::OOPS1003::id_alloc_size;
 		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
-		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
+		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::OOPS1003::debug_object_id;
+		print "in allocate_id, allocated $id from before pool\n" if $OOPS::OOPS1003::debug_object_id;
 	}
 	return $id;
 }

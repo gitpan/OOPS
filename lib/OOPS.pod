@@ -14,12 +14,26 @@
 		password => $password,
 		table_prefix => "MY";
 
-	$oops->{h} = { a => b};
- 	$oops->{foobar} = $myobject;
-	$oops->{abcd} = getref(%{$oops->{h}}, 'a');
-
  	$oops->commit;
+
+	$oops->{my_1st_bit_of_data} = 'a scalar';
+ 	$oops->{my_2nd_bit_of_data} = { A => 'hash' };
+ 	$oops->{my_3rd_bit_of_data} = [ qw(An Array) ];
+ 	$oops->{my_4rd_bit_of_data} = \'a reference to a scalar, ref, hash, or array' ];
+
+	my $old_value = $oops->{multiple}{level}{dereference};
+
+	my $object = $oops->load_object($integer_object_id);
+
+	my $dbh = $oops->dbh();
+
+	$oops->workaround27555($reference);
+
+	my $was_virtual = $oops->virtual_object(\%{$oops->{some}{hash}, [ $new_value ]);
+
  });
+
+ my $ref = getref(%hash, 'key')
 
 =head1 DESCRIPTION
 
@@ -30,26 +44,26 @@ individual hash tables that are too large for memory.  Objects will be
 demand-loaded into memory as they are accessed.  All changes to your
 object hierarchy will be saved with a single commit().
 
-Full transactional consistenty is the only operational mode.  Either all
-of your changes are saved or none of them are.  During your program, you
+Full transactional consistency is the only operational mode.  Either all
+of your changes are saved or none of them are.  While your program runs, you
 will see a consistent view of the data: no other running transactions
 will change the data you see.  If another transaction changes data
 that you are using then at least one of the transactions must abort.
-This happens automatically.
+OOPS will die() to abort the transaction.
 
 OOPS maps all perl objects to the same RDBMS schema.  No advance schema
-definition is required on the part of the user of OOPS.  The name comes
-from the realization that perl's data model is much more complicated
-than I initially understood.  Internally, the RDBMS schema uses four
-tables: a table of objects, a table of attributes (keys and values),
-a table of large attributes that big the normal column widths, and a
-table of counters.
+definition is required on the part of the user of OOPS.  The name of
+the package (OOPS) comes from the realization that perl's data model
+is much more complicated than I initially understood.  Internally, the
+RDBMS schema uses four tables: a table of objects, a table of attributes
+(keys and values), a table of large attributes that big the normal column
+widths, and a table of counters.
 
-At this time, OOPS is expecting a web-like workflow: 
+At this time, OOPS is expecting a web-like work flow: 
 
  create OOPS instance
 
- access some ojbects
+ access some objects
 
  modify some objects
 
@@ -98,7 +112,7 @@ are not efficient.
 
 Large HASHes are supported by only loading keys that are accessed.
 
-HASHes, array elements, and REFs are implmented with tie().  ARRAYs are
+HASHes, array elements, and REFs are implemented with tie().  ARRAYs are
 not currently tie()d because of bugs in perl.  Multiple references to the
 same scalar are supported.  References to array elements and hash values
 are supported.  Persistent data is reference counted and cycles must be
@@ -112,42 +126,71 @@ The following RDBMSs are supported in the code:
 
 =item PostgreSQL
 
-OOPS has been tested with PostgreSQL version 7.4.2 and 7.3.5.  7.4.2 on
-Linux 2.4.23 performs okay.  7.3.5 on pre-release DragonflyBSD is slow.
+OOPS 1.004 has been tested with PostgreSQL version 8.1.4 on Linux.  
+OOPS 1.003 was tested with 7.4.2 and 7.3.5 on Linux and 7.3.5 on
+pre-release DragonflyBSD.  Somewhere between 7.4.2 and 8.1.4 PostgreSQL
+got more strict about TEXT versus BYTEA types.  OOPS 1.003 was using
+TEXT where it should have been using BYTEA.  Be sure to upgrade OOPS
+to 1.004 *before* upgrading PostgreSQL to 8.x. 
+
+Biggest issue: PostgreSQL runs the test suite slowly.
 
 =item mysql
 
-OOPS has been tested with mysql 4.0.16 and 4.0.18 using InnoDB tables. 
+OOPS 1.004 has been tested with mysql 4.1.15 on Linux.
+OOPS 1.003 was tested with mysql 4.0.16 and 4.0.18 using InnoDB tables. 
+
+The OOPS schema for mysql does not support large (>256 byte) hash
+keys.  
+
+Biggest issue: Mysql 4.1.15 (at least) detects some deadlocks very slowly.
 
 =item SQLite
 
-OOPS has been tested with DBD::SQLite 0.31.  
+DBD::SQLite versions 0.x use SQLite 2.x.  DBD::SQLite versions 1.x use
+SQLite 3.x.  Unfortunately, the 1.x versions of DBD::SQLite that have been
+tested with OOPS have failed to pass.  They die consistently a few thousand
+transactions in on certain tests.  Use DBD::SQLite2 instead.
 
-SQLite is not 8-bit clean with respect to C<\0>.  OOPS uses a DBD::SQLite
+If you're using OOPS 1.003 and DBD::SQLite 0.x then upgrade OOPS to 1.004 and
+switch to DBD::SQLite2.  Make both changes at the same time.
+
+OOPS 1.004 has been tested with DBD::SQLite2 0.33.
+OOPS 1.003 was tested with DBD::SQLite 0.31.
+Use DBD::SQLite 1.x at your own risk -- versions 1.11 and 1.12 cannot pass
+the OOPS regression tests.
+
+DBD::SQLite2 is not 8-bit clean with respect to C<\0>.  OOPS uses a DBD::SQLite2
 feature to translate binary nulls.  A side-effect is that backslash
-will be doubled C<\> -> C<\\>.  OOPS does not use the C<counters> table
-with SQLite.
+will be doubled C<\> -> C<\\> in DBD::SQLite2 (the extras will be removed
+transparently by DBD::SQLite2.  OOPS does not use the C<counters> table
+with DBD::SQLite2 (or DBD::SQLite).  As of 1.004, OOPS doesn't make use of the 
+newer (version 1.x) DBD::SQLite features for handling nulls.
 
 L<http://www.hwaci.com/sw/sqlite/>
 
+Biggest issues: SQLite3 fails; SQLite2 leaks memory; both do database-level
+locking only.
+
 =back
 
-Perl versions 5.8.2 through 5.8.4 are supported.  Prior to 5.8.2, it wasn't
+Perl versions 5.8.2 through 5.8.7 are supported.  Prior to 5.8.2, it wasn't
 possible to untie scalars from within the a tied scalar access method.
 An ugly workaround is possible if there is enough interest.
 
-OOPS has been tested on Linux 2.4.23 (Debian unstable as of April '04);
+OOPS 1.004 has been tested on Linux 2.6.15 (Ubuntu 6.06LTS - Dapper Drake).
+OOPS 1.003 was tested on Linux 2.4.23 (Debian unstable as of April '04);
 on FreeBSD 4.9; and on DragonflyBSD prerelease.
 
 As far as performance goes, mysql and SQLite are both about twice as fast
 as PostgreSQL for applications that only have one transaction at at time.
 SQLite is particularly slow when there are multiple transactions as its
-lock grangularity is the entire database.  Mysql also slows down when
+lock granularity is the entire database.  Mysql also slows down when
 there are multiple simultaneous transactions.  I don't know yet which
-backend is fastest for applications with many simultanous transactions.
+back-end is fastest for applications with many simultaneous transactions.
 
 The RDBMS schema for SQLite is different than for mysql or PostgreSQL
-(which are the same as each other). 
+(which are nearly the same as each other). 
 
 =head1 FUNCTIONS
 
@@ -167,7 +210,7 @@ It is not necessary to use the C<transaction()> method.  Beware that nearly
 any operation on persistent date (even read operations) can cause deadlock.
 
 Any use of persistent data can trigger a deadlock.  The
-C<transaction()> function catches this and retries automatically upto
+C<transaction()> function catches this and retries automatically up to
 C<$OOPS::transaction_maxtries> times (15 times unless you change it).
 If you don't use C<transaction()> you might want to catch the exceptions
 that C<transaction()> catches.  To do this, you can regex match C<$@>
@@ -183,22 +226,21 @@ Basically, transaction is a slightly fancier version of the following:
 			&$sub(@args);
 		}
 		last unless $@;
-		next if $@ =~ /$transfailrx/;
+		next if $@ =~ /$OOPS::transfailrx/;
 		die $@;
 	}
  }
 
 The important thing to notice is that your code will be called over and over
-until the transaction suceeeds.  This means you should write your code so that
+until the transaction succeeds.  This means you should write your code so that
 it doesn't have any external side effects until after it calls commit().
 
 =item C<getref(%hash, $key)>
 
-References to tied hash keys are buggy in all perls
-through 5.8.3.  Use getref(%hash, $key) to create your
-reference to a tied hash key.  See:
-L<http://rt.perl.org/rt3/Ticket/Display.html?id=27555> and
-L<http://rt.perl.org/rt3/Ticket/Display.html?id=29224>.
+References to tied hash keys are buggy in all perls through 5.8.7 (and
+beyond?).  Use C<getref(%hash, $key)> to create your reference to a tied
+hash key.  See: L<http://rt.perl.org/rt3/Ticket/Display.html?id=27555>
+and L<http://rt.perl.org/rt3/Ticket/Display.html?id=29224>.
 
  $ref = getref(%hash, $key);
 
@@ -219,14 +261,14 @@ in unexpected and inconsistent results.
 Creates a OOPS object instance.  More than one object instance is allowed at 
 the same time.  Instances are unaware of each other.  Making a reference from
 a persistent object in one instance to a persistent object in another instance
-will cause recursive copying from one instance to the other.
+will cause recursive copying from one instance to the other.  (Untested).
 
 The C<%parameters> are documented in the next section.
 
 =item C<OOPS-E<gt>initial_setup(%parameters)>
 
 Drops and recreates the database tables.  Don't use it too often :-)
-The regression suite drops and re-creates the tables many times.  Be careful.
+The regression suite drops and re-creates the tables many times.  
 
 The C<%parameters> are documented in the next section.
 
@@ -243,7 +285,7 @@ for their behavior.  Here are the parameters allowed:
 
 Many ways to specify the DSN for DBI: as an argument; as an
 OOPS environment variable; as a DBI environment variable.  Use
-at least one :-)  See the DBI documentation for more details.
+at least one :-)  See the L<DBI> documentation for more details.
 
 =item C<user> / C<$ENV{OOPS_USER}> / C<$ENV{DBI_USER}>
 
@@ -259,12 +301,48 @@ required for all databases.
 
 =item C<table_prefix> / C<$ENV{OOPS_PREFIX}>
 
-OOPS allows a prefix to be supplied for it's internal table names.  If you
-set a prefix of C<FOO_> then it will use a C<FOO_object> table instead
-of an C<object> table.  This can be set as an argument to C<new()> or it
-can be set with the environment variable C<$OOPS_PREFIX>.  This allows
-multiple separate object spaces to exist within the same SQL database.
-It's intended use is to support testing vs. production environments.
+OOPS allows a prefix to be supplied for it's internal table names.
+If you set a prefix of C<FOO_> then it will use a C<FOO_object> table
+instead of an C<object> table.  This can be set as an argument to C<new()>
+or it can be set with the environment variable C<$OOPS_PREFIX>.  This
+allows multiple separate object spaces to exist within the same backend
+SQL database.  It's intended use is to support testing vs. production
+environments but it could also be used to segregate object spaces that 
+don't link to each other.
+
+The current tables and indexes are:
+
+=over 15
+
+=item object
+
+Each row is an object.
+
+=item attribute
+
+Each row is an attribute value in an object.
+
+=item big
+
+Each row is a large attribute value.
+
+=item counters
+
+Counters for things like object ids.
+
+=item temp
+
+A temporary table.
+
+=item group_index
+
+Object grouping index.
+
+=item value_index
+
+Lookup by attribute value.
+
+=back
 
 =item C<auto_upgrade> / C<$ENV{OOPS_UPGRADE}>
 
@@ -314,29 +392,29 @@ Don't sync() at all and go really fast.
 Writes any changed objects back to the database and commits
 the transaction.  Currently only one commit() call is allowed.  
 Do not access your persistent data after commit() -- it may work
-but this is not covered well in the regresssion suite.
+but this is not covered well in the regression suite.
 
 =item C<-E<gt>virtual_object(\%hash [,$new_value])>
 
 Queries [and sets] the load-virtual flag on a persistent hash.  Hashes that
 load virtual will do separate queries for each key rather than load the
-entire hash.  This is a good thing if your has has many keys.  This flag
+entire hash.  This is a good thing if your has has lots of keys.  This flag
 takes effect the next time the hash is loaded.  The value is a perl boolean.
 
 This may be handled automatically in the future.
 
 =item C<-E<gt>workaround27555($reference)>
 
-References to tied hash keys are buggy in all perls
-through 5.8.3.  Use workaround27555($reference) to register your
-new tied hash key references so that they can be transformed
-into references that actually work correctly.
+References to tied hash keys are buggy in all perls through 5.8.7 (and
+beyond?).  Use workaround27555($reference) to register your new tied
+hash key references so that they can be transformed into references that
+actually work correctly.
 
  $ref = \%hash{$key};
  $oops->workaround27555($ref);
 
 C<workaround27555()> is harmless if called on other sorts of
-references so it is safe to use indescriminately.
+references so it is safe to use indiscriminately.
 See L<http://rt.perl.org/rt3/Ticket/Display.html?id=27555>.
 
 Alternatively, use C<getref(%hash, $key)>.
@@ -355,26 +433,31 @@ those who want to hand-write queries.
 
 =back
 
-=head1 ERRATA, DEVELOPMENT STATUS, BUGS, AND BUG BOUNTY
+=head1 ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
 
-OOPS has been thoroughly tested.  As this is written, there are no known
-users of OOPS.  Don't let this stop you from using it!  Someone has
-to go first.  The regression suite is very well developed: there is
-twice as much code in the test suite as there is in the module itself.
-The suite does over 1.5million tests.  On my fastest computer it takes
-over six hours to run.  I have so much confidence in my test suite,
-I'm offering a bounty on bugs!
+OOPS has been thoroughly tested.  The regression suite is very well
+developed: there is twice as much code in the test suite as there is in
+the module itself.  The suite does over 1.5million tests.  On my fastest
+computer it takes over six hours to run.  I have so much confidence in
+my test suite, I'm offering a bounty on bugs!
 
 =head2 Bug Bounty
 
 I'll pay (via paypal) US$5.00 to anyone who submits a new bug (with
 regression test) that is caused by a problem in my OOPS module.
 To qualify, bugs must be serious: they must cause data corruption,
-false results, or program failure. Bugs must not be listed here.
+false results, or program failure. Bugs must not be listed here or
+be *caused* by using a versions of perl, modules, or RDBMSs that are
+not explicitly supported.
 
 I'll report the number of bounties paid in the CHANGELOG.
 
-=head2 Known fixable bugs in OOPS
+=head2 Community
+
+There is a mailing list for OOPS.  Send a message to 
+oops-subscribe@idiom.com to subscribe.
+
+=head2 Known bugs in OOPS
 
 =over 4
 
@@ -382,20 +465,16 @@ I'll report the number of bounties paid in the CHANGELOG.
 
 OOPS currently has memory leaks. This may or may not matter to your
 application.  The rate of leakage varies depending on which RDBMS is
-used.  SQLite seems to have the most significant problems. 
-
-=item Schema error with mysql
-
-There is an error in the schema that OOPS uses with mysql.  This
-error does not cause any problems with the versions of mysql that
-OOPS has been tested with (4.0.16 and 4.0.18).  This error will
-be fixed in the next version of OOPS.
+used.  SQLite seems to have the most significant problems.  Most of
+the leaks are not in OOPS itself but in the modules it uses and thus
+are not easily fixed by the OOPS developers.
 
 =item delayed DESTROY
 
 Additional references to the in-memory copies of persistent data are
-kept by OOPS.  These extra references will prevent DESTORY methods from
-being called as soon as they otherwise would be.
+kept by OOPS.  These extra references will prevent DESTROY methods from
+being called as soon as they otherwise would be.  They'll usually be
+delayed until the OOPS object is itself DESTROYed.
 
 =item other magic
 
@@ -419,12 +498,12 @@ is no reference to the scalar.  The following code prints C<true>.
  print "true\n" if $z eq 'baz';
 
 At the current time, OOPS does not store such blessings.  OOPS does
-remember blessings when there is a reference.
+remember blessings when there isn't a reference.
 
 =item re-blessing the OOPS object
 
 If you re-bless the OOPS object, your data is likely to become
-inaccessable.  I list this here so nobody claims a bounty for breaking
+inaccessible.  I list this here so nobody claims a bounty for breaking
 OOPS in this way.
 
 =item DBD::Pg and ASCII NULL
@@ -433,13 +512,29 @@ DBD::Pg does not easily support ASCII NULL.  OOPS has only partial
 support for ASCII NULL with PostgreSQL: don't have ASCII NULL in your 
 class names.
 
+=item Circular references sometimes break
+
+OOPS mostly allows you to make circular self-references:
+
+ my $x;
+ $x = \$x;
+
+In some (rare) cases circular self-references sometimes break.  Since
+I can't think on any good reason to make a circular self-reference, I've
+left this hanging.
+
+=item Long hash keys
+
+The database schema for OOPS does not support huge hash keys in 
+RDBMS backends.
+
 =back
 
 =head2 Bugs in perl that effect OOPS
 
 =over 4
 
-=item references to hash keys
+=item References to hash keys
 
 Persistent hashes are implemented with tie.  There are bugs with 
 perl's implementation of references to tied hash keys.  These bugs will
@@ -448,7 +543,7 @@ key that doesn't exist yet; deleting a key that has a reference tied to
 it; assigning through a reference to a key that has multiple references.
 
 All of the above can either be avoided or you can workaround them by
-either calling C<workaround27555>($YOUR_REFERENCE) whenver you create 
+either calling C<workaround27555>($YOUR_REFERENCE) whenever you create 
 a tied hash key reference or by using C<getref(%hash, $key)> to 
 create your reference.
 
@@ -458,27 +553,28 @@ L<http://rt.perl.org/rt3/Ticket/Display.html?id=29224>.
 
 =item C<local> and tie
 
-C<local(%some_tied_hash)> doesn't work right.  Thus C<local(%some_persistent_hash)>
-won't work right either:
+C<local(%some_tied_hash)> doesn't work right.  
+Thus C<local(%some_persistent_hash)> won't work right either:
 L<http://rt.perl.org/rt3/Ticket/Display.html?id=6017>.
 
 =item C<scalar(%hash)>
 
-C<scalar(%hash)> support was added in perl 5.8.3 and does not
+Tied C<scalar(%hash)> support was added in perl 5.8.3 and does not
 exist in 5.8.2.
 
-=item tied arrays don't work right
+=item Tied arrays don't work right
 
 There are a couple of bugs with tied arrays that prevent OOPS from
 using them: L<http://rt.perl.org/rt3/Ticket/Display.html?id=22570>
-and L<http://rt.perl.org/rt3/Ticket/Display.html?id=22571>.  This isn't
-a big deal unless you've got big arrays.
+and L<http://rt.perl.org/rt3/Ticket/Display.html?id=22571>.  OOPS
+fully loads arrays into memory to work-around this problem.  This isn't
+a big deal unless you've got big arrays.  
 
 =item SQLite and perl's malloc().
 
 If SQLite is used with a perl that has been compiled to use perl's
 C<malloc()>, it will report LOTS of C<Bad free() ignored (PERL_CORE)>
-errors.  It is not currently known if these errors are harmfull beyond
+errors.  It is not currently known if these errors are harmful beyond
 generating lots of output to STDERR.  The default perl configuration on
 FreeBSD uses perl's C<malloc()>.
 
@@ -487,15 +583,16 @@ FreeBSD uses perl's C<malloc()>.
 =head1 SCHEMA VERSIONS
 
 As OOPS is developed, the schema that OOPS uses changes.  At the current
-time, all versions of OOPS use forward and backwards compatable (though
+time, all versions of OOPS use forward and backwards compatible (though
 not identical) schemas.
 
 OOPS notices if the version of the schema in the DBMS is different than
 the version the code currently supports.  When this happens there are
 two possibilities: either OOPS will upgrade the schema to the current
 version or it will use an older version of OOPS to access the data.
+See the C<auto_upgrade> notes in the B<PARAMETERS FOR NEW> section.
 
-This behavior allows the OOPS module to be upgraded without distrupting
+This behavior allows the OOPS module to be upgraded without disrupting
 installed applications.
 
 =head1 FUTURE DIRECTIONS
@@ -509,21 +606,22 @@ that I know there is interest...
 =item fix the bugs
 
 There are bugs listed in the DEVELOPMENT STATUS section that
-could be fixed.  First up is fixing the memory leak.
+could be fixed.  First up is fixing the memory leaks that are
+in OOPS itself.
 
 =item code cleanup and general performance enhancements
 
-The initial release of OOPS concentrated on correct behavior
+The initial releases of OOPS concentrated on correct behavior
 and other aspects of the module were somewhat ignored.  The code
 could be cleaned up a bunch. 
 
-=item better concurency
+=item better concurrency
 
-With the transaction model of SERIALIABLE on mysql, there are 
+With the transaction model of SERIALIZABLE on mysql, there are 
 serious performance issues surrounding access to the main hash.
 Change to a different transaction model or DBMS.
 
-=item perl-syntax sql query translator
+=item perl-syntax SQL query translator
 
  SELECT Employee WHERE $Employee->{salary} > 5000
 
@@ -535,10 +633,6 @@ that can be used to query the object store.
 Objects are loaded in groups rather than individually.  There is
 much room for improvement in choosing how groups are formed.  This
 is largely undeveloped as yet.
-
-=item support for databases other than mysql
-
-PostgreSQL is the next likely supported backend.
 
 =item caching
 
@@ -573,7 +667,7 @@ This isn't something that I care about but maybe someone else does?
 =item schema enforcement
 
 Allow explicit schemas to be defined.  Do not save objects that 
-don't conform.
+don't conform.  Eg: Hash::Util::lock_keys().
 
 =item RDBMS -> object mapping
 
@@ -593,9 +687,9 @@ ties.
 
 =item garbage collect circular references
 
-Like perl, OOPS uses reference counting to know when to delete
-an object.  Unlike perl, restarting your program does not clear
-out the circular references.
+Like perl, OOPS uses reference counting to know when to delete an object.
+Unlike a normal program, restarting your program does not clear out the
+circular references.
 
 =item support for other base types.
 
@@ -663,8 +757,8 @@ A SCALAR or REF.
 
 =item attribute
 
-This is a table of key/value pairs.  The keys corrospond to perl hash keys
-and perl array indexes.  The values corrospond to perl hash values and
+This is a table of key/value pairs.  The keys correspond to perl hash keys
+and perl array indexes.  The values correspond to perl hash values and
 array element values.
 
 =over 10
@@ -774,7 +868,7 @@ An example:
  383		400		'a-key'		0
 
  384		384		'nopkey'	0
- 384		'nokey'		'a-value'	0
+ 384		'nopkey'	'a-value'	0
 
  385		384		'nopkey'	0
 
@@ -839,10 +933,11 @@ Here are some examples.
 
 =item C<SELECT Foobar WHERE $Foobar-E<gt>{xyz} = 'abc'>
 
- SELECT	object
+ SELECT	object.id
  FROM	object, attribute
  WHERE	object.class = 'Foobar'
  AND	object.id = attribute.id
+ AND	object.otype = 'H'
  AND	attribute.pkey = 'xyz'
  AND	attribute.pval = 'abc'
  AND	attribute.ptype = '0'
@@ -875,7 +970,7 @@ idea...
 If you construct a query like these examples that return object id's, then
 use C<$object = $oops-E<gt>load_object($id)> to load them into memory.
 
-I reccomend that hand-written queries be read-only as there are 
+I recommend that hand-written queries be read-only as there are 
 additional columns that must be kept consistent.  For example, the
 object table includes a reference count column to handle garbage
 collection of the persistent data.
@@ -905,10 +1000,10 @@ mysql configuration includes making replication master logs.
 =head1 THE COMPETITION
 
 There are a number of other modules that make perl objects persistent.
-For each module, I'll provde a sentence or two that explains why I wrote 
+For each module, I'll provide a sentence or two that explains why I wrote 
 OOPS rather than using that one.
 
-OOPS does not require any schema defintion.  Most other persistence
+OOPS does not require any schema definition.  Most other persistence
 package requires schema definition and allows the nature of the underlying
 RDBMS to show in both the kinds of objects you can use and how you
 use them.  OOPS tries to let you work with perl objects without 
@@ -950,10 +1045,17 @@ Must define schema and relationships as relates to RDBMS.
 Close tie to underlying RDBMS.  Can help create RDBMS schema.
 Complex.  Can cache database rows.
 
-=item Tangram
+=item Tangram / T2
 
-Must define schmea.  RDBMS schema is created from perl 
-schema.
+Must define schema.  
+RDBMS schema is created from perl schema.
+Can automatically follow references (T2).
+
+=item Rose::DB::Object
+
+Must define schema in package files.  
+RDBMS schema is created from perl schema.
+Operations are straightforward mappings to SQL.
 
 =item DBM::Deep
 
@@ -962,8 +1064,8 @@ for queries or transactions.
 
 =item Pixie
 
-Less trasnparent.  Requires user to remember a cookie to
-retreive objects.  Cannot handle cross-linking of objects?
+Less transparent.  Requires user to remember a cookie to
+retrieve objects.  Cannot handle cross-linking of objects?
 No query support?
 
 =item MLDBM / Tie::MLDBM / MLDBM::Easy / MLDBM::Sync
@@ -984,104 +1086,24 @@ L<http://poop.sourceforge.net/> has an overview of options.
 
 =head1 LICENSE
 
-Copyright(C) 2004 David Muir Sharnoff <muir@idiom.com>
+This software is available with and without the GPL: please write if
+you need a non-GPL license.  All submissions of patches must come with
+a copyright grant so that David Sharnoff remains able to change the
+license on OOPS as he sees fit.
 
-All rights reserved except as granted by a license or contract.  This
-module is licensed both commercially and as free software.  The free
-software license follows.
+Copyright(C) 2004-2006 David Muir Sharnoff <muir@idiom.com>
 
-B<The Play-Fair-To-Play Software License> 
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
 
-Preamble.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 
-I wish to let people use this software for free as long as they don't
-abuse the free software community or Internet in particular ways.
-I want all derrivitives of this software to be free.  I want to be able
-to license this software commercially.
-
-This license is not compatabile with the GPL.  It was not written by a
-lawyer and the exact wording will probably change when a legal expert
-examines it.  This license applies only to this version of this program:
-other versions may exist with other licenses.
-
-=over 7
-
-=item I.
-
-This software may be used, copied, modified, and redistributed with no
-fee paid to the copyright holder (original licensor) so long as all the
-parts of this license are honored.  Should any part be deemed invalid or
-otherwise contradicted, the entire license is invalidated and no right
-to use, copy, modify or redistribute exists.
-
-=item II.
-
-Any redistribution of this software must retain this license.
-Any redistribution of this software must include it's original (source
-code) form.  When redistributing this software, you may not add additional
-licensing terms that would prevent the new recipient of the software from
-using, copying, modifying, or redistributing this software themselves
-under the terms of this license.
-
-=item III.
-
-This software is licensed free of charge.  To the extent permitted by
-applicable law, there is no warranty for the software.  The software
-"as is" without warranty of any kind, either expressed or implied,
-including, but not limited to, the implied warranties of merchantability
-and fitness for a particular purpose.  The entire risk as to the quality
-and performance of the software is with you. should the software prove
-defective, you assume the cost of all necessary servicing, repair or
-correction.
-
-=item IV.
-
-All useful modifications to this software must be licensed back to the
-original licensor such that the original licensor can relicense the
-modifications to third parties under terms of their own choosing with
-no restrictions whatsoever and no need to even acknowledge the origin
-of such modifications.  There are two easy ways to accomplish this: put
-all such modifications into the public domain or assign the copyright
-to the original licensor.
-
-=item V.
-
-Entities that have willfully violated an open source license are 
-excluded from this license.
-For example, SCO for violating the GPL.  
-
-=item VI.
-
-Entities that have attempted to enforce a software patent (except as a
-defensive move like IBM's counter to SCO) are excluded from this license.
-For example, Unisys for enforcing a patent on GIF image creation.
-
-=item VII.
-
-Entities that engage in or encourage sending SPAM emails are excluded 
-from this license.
-
-=item VIII.
-
-Entities that are or have challenged this license in court are excluded
-from this license.
-
-=item IX.
-
-The following entities are excluded from this license:
-Network Solutions; Verisign; ICANN; and Internet-Journals.
-
-=item X.
-
-Entities that share a 5% or more common ownership interest with an
-excluded entity are also excluded from this license. 
-
-=item XI.
-
-Entities that are excluded from this license are forbidden to use, copy,
-modify, or redistribute the covered software.
-
-=back
-
-This is version 1.1 of the Play-Fair-To-Play Sofware License.
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 

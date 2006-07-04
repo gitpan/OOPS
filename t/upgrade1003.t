@@ -5,13 +5,20 @@ BEGIN {
 		unless defined $OOPS::SelfFilter::defeat;
 }
 BEGIN {
+	if ($ENV{OOPSTEST_DSN} && $ENV{OOPSTEST_DSN} !~ /^dbi:(mysql|pg|sqlite)\b/i) {
+		print "1..0 # Skipped: only mysql, PostgreSQL, and SQLite supported by OOPS 1.001\n";
+		exit;
+	}
 	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
 		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
 		exit;
 	}
-	if ($ENV{OOPSTEST_DSN} && $ENV{OOPSTEST_DSN} !~ /^dbi:(mysql|pg|sqlite)\b/i) {
-		print "1..0 # Skipped: only mysql, PostgreSQL, and SQLite supported by OOPS 1.001\n";
-		exit;
+	for my $m (qw(Data::Dumper Clone::PP)) {
+		unless ( eval " require $m " ) {
+			print "1..0 # Skipped: this test requires the $m module\n";
+			exit;
+		}
+		$m->import();
 	}
 }
 
@@ -22,16 +29,19 @@ use diagnostics;
 
 use Clone::PP qw(clone);
 use Data::Compare;
+use Data::Dumper;
+modern_data_compare();
 
 our $oldver;
-$oldver = 1001 unless defined $oldver;
+$oldver = 1003 unless defined $oldver;
 
 require "OOPS/OOPS$oldver.pm";
 eval " OOPS::OOPS${oldver}->import; ";
 die $@ if $@;
 use strict;
 
-modern_data_compare();
+my $debug = 1;
+
 print "1..459\n";
 
 sub selector {
@@ -41,20 +51,18 @@ sub selector {
 }
 
 my $tests = <<'END';
-	%$root = ();
-	my $x = getref(%$root, 'FOO23');
-	$root->{FOO23} = \$x;
+	$root->{xy} = \$root->{akey}
 	---
-	delete $root->{FOO23};
+	delete $root->{hkey}
 END
 
 delete $ENV{OOPS_UPGRADE};
 my $x;
 supercross2($tests, {
-		skey => 'sval',
+		skey => 'sval' x 75,
 		rkey => \$x,
-		akey => [ 'hv1' ],
-		hkey => { skey2 => 'sval2' },
+		akey => [ 'hv1' x 100 ],
+		hkey => { skey2 => 'sval2' x 150 },
 	}, \&selector);
 	
 
@@ -127,9 +135,9 @@ sub supercross2
 									delete $args{auto_upgrade};
 									rcon;
 									test($r1->{arraylen}{1} == $oldver);
-
 									my $x = 'rval';
 									$mroot = clone($baseroot);
+#print Dumper(__LINE__, 'mroot', $mroot);
 									&$pre($mroot) if $pre;
 
 									$r1->{named_objects}{root} = clone($mroot);
@@ -145,15 +153,23 @@ sub supercross2
 									for my $tn (0..$#func) {
 										my $tf = $func[$tn];
 										$proot = $r1->{named_objects}{root};
+#print Dumper(__LINE__, 'proot', $proot);
 
 										print "# EXECUTING $tests[$tn]\n" if $debug;
-										&$tf($mroot,$subtest,$subtest2,$subtest3);
 										&$tf($proot,$subtest,$subtest2,$subtest3);
+#print Dumper(__LINE__, 'proot', $proot);
+
+										&$tf($mroot,$subtest,$subtest2,$subtest3);
+#print Dumper(__LINE__, 'mroot', $mroot);
 
 										$r1->commit
 											if $docommit & 2**$tn;
 										print "# COMPARING\n" 
 											if $dosamesame & 2**$tn && $debug;
+
+#print Dumper(__LINE__, 'proot', $proot);
+#print Dumper(__LINE__, 'mroot', $mroot);
+
 										test(docompare($mroot, $proot), "<$tn>$sig")
 											if $dosamesame & 2**$tn;
 										upgrade($do_upgrade)
@@ -161,7 +177,6 @@ sub supercross2
 									}
 									print "# FINAL COMPARE\n" if $debug;
 									test(docompare($mroot, $proot), "<END>$sig");
-print "CURR: $r1->{arraylen}{1}\n";
 									test($r1->{arraylen}{1} == $OOPS::SCHEMA_VERSION);
 								}
 							}
@@ -182,7 +197,7 @@ print "CURR: $r1->{arraylen}{1}\n";
 
 sub upgrade
 {
-print "ugprade? $_[0]\n";
+	print "# ugprade? $_[0]\n";
 	if ($_[0]-- == 0) {
 		test($r1->{arraylen}{1} == $oldver);
 		$args{auto_upgrade} = 1;
@@ -190,6 +205,7 @@ print "ugprade? $_[0]\n";
 		rcon;
 		test($r1->{arraylen}{1} == $OOPS::SCHEMA_VERSION);
 	} else {
+		print "# Not upgrading\n";
 		rcon;
 	}
 }
@@ -202,6 +218,6 @@ sub count_bits
 		$bits++ if $x & 1;
 		$x <<= 1;
 	}
-print "bits for $_[0] = $bits\n";
+#print "bits for $_[0] = $bits\n";
 	return $bits;
 }

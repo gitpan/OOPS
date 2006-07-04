@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -16,6 +16,7 @@ use strict;
 use warnings;
 use diagnostics;
 
+modern_data_compare();
 print "1..128860\n";
 
 sub selector {

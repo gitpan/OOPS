@@ -1,5 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
-
+#!/usr/bin/perl -I../lib -I./..
 
 BEGIN {
 	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
@@ -20,12 +19,15 @@ BEGIN {
 }
 
 use OOPS;
+require Carp::Heavy;
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
 use strict;
 use warnings;
 
 use OOPS::TestCommon;
+
+modern_data_compare();
 
 import Clone::PP qw(clone);
 

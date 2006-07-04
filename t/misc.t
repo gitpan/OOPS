@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -30,6 +30,8 @@ use warnings;
 use diagnostics;
 
 use OOPS::TestCommon;
+
+modern_data_compare();
 
 print "1..7872\n";
 
@@ -193,8 +195,8 @@ END
 		$root->{akey}[4] = 'ab20' x ($ocut / 4 + 1);
 		---
 		$#{$root->{akey}} = 2;
+
 END
-	
 	for my $test (split(/^\s*$/m, $tests)) {
 		#
 		# commit after each test?

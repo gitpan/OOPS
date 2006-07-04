@@ -3,7 +3,14 @@ package OOPS::Setup; # dummy
 
 package OOPS;
 
-our $nodatarx = qr/with '1':no such table: \S+object|with '1':Table '\S+object' doesn't exist| with '1':ERROR:  relation "\S+object" does not exist/;
+# Regular expression to match error returned when the database
+# has not been initialized:
+#
+#	mysql		with '1':Table 'PREFIXobject' doesn't exist
+# 	sqlite		no such (?:table|table): at dbdimp.c
+#	postgresql	with '1':ERROR:  relation "PREFIXobject" does not exist
+#
+our $nodatarx = qr/with '1':Table '\S+object' doesn't exist| with '1':ERROR:  relation "\S+object" does not exist|no such table: /;
 
 sub initial_setup_real
 {
@@ -19,11 +26,32 @@ sub initial_setup_real
 	for my $t (&{"OOPS::${dbms}::table_list"}()) {
 		$x .= "-DROP TABLE $t;\n";
 	}
-	db_domany($pkg, \%args, 
+	my ($oldout, $olderr, $obuf, $ebuf);
+	if ($ENV{HARNESS_ACTIVE}) {
+		open $oldout, ">&", *STDOUT or die "Can't dup STDOUT: $!";
+		open $olderr, ">&", *STDERR or die "Can't dup STDERR: $!";
+		select(STDOUT);
+		$obuf = $|;
+		select(STDERR);
+		$ebuf = $|;
+		close(STDOUT);
+		close(STDERR);
+	}
+	db_domany($pkg, 
+		\%args, 
 		$x 
-		. &{"OOPS::${dbms}::tabledefs"}() 
-		. db_initial_values() 
-		. &{"OOPS::${dbms}::db_initial_values"}());
+		 . &{"OOPS::${dbms}::tabledefs"}() 
+		 . db_initial_values() 
+		 . &{"OOPS::${dbms}::db_initial_values"}(),
+		$ENV{HARNESS_ACTIVE});
+	if ($ENV{HARNESS_ACTIVE}) {
+		open STDOUT, ">&", $oldout or die "Can't dup \$oldout: $!";
+		open STDERR, ">&", $olderr or die "Can't dup \$olderr: $!";
+		select(STDERR);
+		$| = $ebuf;
+		select(STDOUT);
+		$| = $obuf;
+	}
 	return $dbms;
 }
 
@@ -45,7 +73,7 @@ END
 
 sub db_domany
 {
-	my ($pkgoops, $connectargs, $x) = @_;
+	my ($pkgoops, $connectargs, $x, $silent) = @_;
 	my ($dbh, $dbms, $prefix);
 	if (ref $pkgoops) {
 		$dbh = $pkgoops->{dbh};
@@ -53,24 +81,34 @@ sub db_domany
 	} else {
 		($dbh, $dbms, $prefix) = OOPS->dbiconnect(%$connectargs);
 	}
-	while ($x =~ /\G\s*(\S.*?);\n/sg) {
+	my @ret;
+	$x .= ";\n" unless $x =~ /;/;  # if there's just one query...
+
+	while ($x =~ /\G\s*(\S.*?);\n/sgc) {
 		my $stmt = $1;
 		$stmt =~ s/TP_/$prefix/g;
-		#print "do $stmt\n";
+		print STDERR "do $stmt\n" if $OOPS::debug_initialize;
 		if ($stmt =~ s/^-//) {
-			eval { $dbh->do($stmt) } || do {
-				warn "do '$stmt':".$dbh->errstr;
-				$dbh->disconnect;
-				$dbh = OOPS->dbiconnect(%$connectargs);
-			};
+			eval { my $r = $dbh->do($stmt) } 
+				or do {
+					warn "do '$stmt':".$dbh->errstr
+						unless $silent;
+					$dbh->disconnect;
+					$dbh = OOPS->dbiconnect(%$connectargs);
+					push(@ret, $r);
+				};
 		} else {
-			$dbh->do($stmt) || die "<<$stmt>>".$dbh->errstr; 
+			my $r = $dbh->do($stmt) 
+				or die "<<$stmt>>".$dbh->errstr; 
+			push(@ret, $r);
 		}
 	}
+	die "x='$x'" unless $x =~ /\G\s*\Z/sg;
 	$dbh->commit;
 	unless (ref $pkgoops) {
-		$dbh->disconnect;
+		$dbh->disconnect();
 	}
+	return(@ret);
 }
 
 #

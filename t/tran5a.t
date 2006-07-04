@@ -1,20 +1,10 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
 }
-BEGIN {
-	for my $m (qw(Data::Dumper Clone::PP)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
 
-import Clone::PP qw(clone);
 
 use OOPS qw($transfailrx);
 use Carp qw(confess);
@@ -22,18 +12,42 @@ use Scalar::Util qw(reftype);
 use strict;
 use warnings;
 use diagnostics;
-use OOPS::TestCommon;
 
-if ($dbms eq 'sqlite') {
-	print "1..0 # Skipped: this test requires simultanous access\n";
-	exit;
+use OOPS::TestCommon;
+use Clone::PP qw(clone);
+
+modern_data_compare();
+BEGIN {
+	if ($dbms =~ /sqlite/) {
+		print "1..0 # Skipped: this test not supported on $dbms\n";
+		exit;
+	}
+
+	unless (eval { require Test::MultiFork}) {
+		print "1..0 # Skipped: this test requires Test::MultiFork\n";
+	};
+	unless (eval { require Time::HiRes}) {
+		print "1..0 # Skipped: this test requires Time::HiRes\n";
+	};
+
+	import Time::HiRes qw(sleep);
+
+	$Test::MultiFork::inactivity = 60; 
+	import Test::MultiFork qw(stderr bail_on_bad_plan);
 }
 
+
 my $looplength = 1000;
+$looplength /= 10 unless $ENV{OOPSTEST_SLOW};
+if ($ENV{OOPSTEST_DSN} && $ENV{OOPSTEST_DSN} =~ /^dbi:mysql/i) {
+	printf STDERR "# mysql is very slow at this test, reducing iterations from %d to %d\n",
+		$looplength, $looplength / 20;
+	$looplength = int($looplength/20);
+}
 $OOPS::debug_dbidelay = 0;
 $debug = 0;
 
-BEGIN { $Test::MultiFork::inactivity = 60; }
+
 use Test::MultiFork qw(stderr bail_on_bad_plan);
 import Test::MultiFork qw(colorize)
 	if -t STDOUT;
@@ -84,7 +98,7 @@ ab:
 		$OOPS::debug_dbidelay = 1;
 	}
 	rcon;
-	my $x = int(rand($OOPS::debug_tdelay)); if ($OOPS::debug_tdelay && $OOPS::debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
+	sleep(rand($OOPS::debug_tdelay)/1000) if $OOPS::debug_tdelay && $OOPS::debug_dbidelay;
 	eval {
 		my $no = $r1->{named_objects};
 		$no->{$to}{coin1} = $no->{joe}{coin1};

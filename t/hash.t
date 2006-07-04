@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
@@ -28,6 +28,8 @@ use warnings;
 use diagnostics;
 
 use OOPS::TestCommon;
+
+modern_data_compare();
 
 print "1..5123\n";
 
@@ -83,6 +85,7 @@ resetall; # --------------------------------------------------
 						}
 					}
 				}
+				check_resources();
 			}
 		}
 	};
@@ -130,6 +133,7 @@ resetall; # --------------------------------------------------
 						}
 					}
 				}
+				check_resources();
 			}
 			if ($clearcode & (2**$n)) {
 				%$root = ();

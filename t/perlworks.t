@@ -1,4 +1,4 @@
-#!/home/muir/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib -I..
 
 use warnings;
 use strict;
@@ -8,7 +8,7 @@ use strict;
 #
 
 use Scalar::Util qw(refaddr reftype blessed weaken);
-use Test::More tests => 128;
+use Test::More tests => 129;
 use B 'svref_2object';
 use strict;
 use warnings;
@@ -786,8 +786,11 @@ print "# block at ".__LINE__."\n";
 	$x{$b} = 23;
 	ok(ref($x{$y}));
 	ok(ref($x{$b}));
-	ok(! refaddr($x{$y})); # bug
-	ok(! refaddr($x{$b})); # bug
+	{
+		local $TODO = 'Do these still fail?  Multiple versions of Util::Scalar?';
+		ok(refaddr($x{$y})); # bug
+		ok(refaddr($x{$b})); # bug
+	}
 	my $xy = $x{$y}; 
 	my $xb = $x{$b}; 
 	ok(refaddr($xy) == refaddr($y));
@@ -869,6 +872,19 @@ print "# block at ".__LINE__."\n";
 		FO22();
 	};
 	ok($x =~ /^XXX/);
+}
+
+#
+# Does eval { return } return from the outer sub?
+#
+print "# block at ".__LINE__."\n";
+{
+	sub xy7 {
+		eval { return 3 };
+		return 4;
+	}
+	my $x = xy7();
+	ok($x == 4);
 }
 
 package Hash1;

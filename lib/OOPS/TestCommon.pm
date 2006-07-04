@@ -13,6 +13,7 @@ package OOPS::TestCommon;
 	$bbs
 	$basecount
 	$dbms
+	$tcTODO
 	notied
 	nodata
 	test
@@ -35,20 +36,25 @@ package OOPS::TestCommon;
 	wa
 	db_drop
 	supercross1
+	supercross7
 	rvsamesame
 	ref2string
+	modern_data_compare
+	check_resources
+	safeout
 	$test_dsn
 	$test_user
 	$test_pass
 	$multiread
 	$Npossible
 	$Nvert
+	$prefix
 	%args
 	);
 @ISA = qw(Exporter);
 
 BEGIN {
-	for my $m (qw(Data::Compare Clone::PP)) {
+	for my $m (qw(Data::Compare Clone::PP BSD::Resource)) {
 		unless ( eval " require $m " ) {
 			print "1..0 # Skipped: this test requires the $m module\n";
 			exit;
@@ -60,6 +66,7 @@ BEGIN {
 use OOPS;
 use OOPS::Setup;
 import Clone::PP qw(clone); 
+use Carp::Heavy; # weird error sometimes w/o this
 use Carp qw(confess);
 use Scalar::Util qw(reftype refaddr);
 use Data::Dumper;
@@ -69,11 +76,14 @@ require Exporter;
 select(STDOUT);
 $| = 1;
 
-our $debug = 1;
+our $debug = ! $ENV{HARNESS_ACTIVE};
+print STDERR "# Debugging on\n" if $debug;
 
 our $multiread = 0;
 
 our $test_dsn;
+
+our $tcTODO;
 
 BEGIN	{
 	$test_dsn = $ENV{OOPSTEST_DSN};
@@ -104,6 +114,7 @@ $args{default_synchronous} = 'OFF' if $test_dsn =~ /^DBI:SQLite:/i;
 
 our $fe;
 our ($r1, $r2);
+our $prefix;
 
 our $okay = 1;
 
@@ -135,6 +146,13 @@ sub eline
 		 return($debug ? $l : $line) if $filename ne __FILE__;
 		 return '???' unless $filename;
 	}
+}
+
+sub safeout
+{
+	my $x = join('', @_);
+	$x =~ s/\n([^\#])/\n#$1/g;
+	print STDERR $x;
 }
 
 sub rvnotied
@@ -184,6 +202,9 @@ sub russian_roulette
 	print $msg if defined $msg;
 	print "\nBail out!   ... early so the error doesn't scroll away\n";
 	print Carp::longmess();
+	select(STDOUT);
+	$| = 1;
+	print "";
 	kill(9,$$);
 }
 
@@ -207,7 +228,7 @@ sub nodata
 	russian_roulette($count ne $basecount, "basecount: $basecount\nnewcount: $count\n");
 }
 
-sub test
+sub todo_test
 {
 	my ($true, $msg) = @_;
 
@@ -217,10 +238,29 @@ sub test
 	$pm =~ s/\A\s*(.*?)\s*\Z/$1/s;
 	$pm =~ s/\n\s*/\\n /g;
 	print "not " unless $true;
-	print "ok $okay - line$line # $pm\n";
+	print "ok $okay - line$line # TODO $pm\n";
+	$okay++;
+}
+
+sub test
+{
+	my ($true, $msg) = @_;
+
+	my $line = eline;
+
+	my $todo = $tcTODO
+		? "TODO ($tcTODO) "
+		: "";
+
+	my $pm = $msg || '';
+	$pm =~ s/\A\s*(.*?)\s*\Z/$1/s;
+	$pm =~ s/\n\s*/\\n /g;
+	print "not " unless $true;
+	print "ok $okay - line$line # $todo$pm\n";
 	$okay++;
 
-	russian_roulette(! $true);
+	russian_roulette(! $true)
+		unless $tcTODO;
 }
 
 sub rvsamesame
@@ -273,32 +313,76 @@ sub docompare
 	my $r = Data::Compare::Compare($x, $y);
 	return $r if $r;
 
-	#my $x1 = Dumper($x);
-	#my $x2 = Dumper($y);
-	#return 1 if $x1 eq $x2;
-	##print "x1=$x1\nx2=$x2\n";
-	
-	#my $y1 = YAML::Dump($x);
-	#my $y2 = YAML::Dump($y);
-	#return 1 if $y1 eq $y2;
-	##print "y1=\n$y1\ny2=\n$y2\n";
-
-	#my $b1 = Data::Dump::dump($x);
-	#my $b2 = Data::Dump::dump($y);
-	#return 1 if $b1 eq $b2;
-	#print "b1=$b1\nb2=$b2\n";
-
+#	my $x1 = Dumper($x);
+#	my $x2 = Dumper($y);
+#	return 1 if $x1 eq $x2;
+#	safeout "# x1=$x1\nx2=$x2\n" if $debug;
+#	
+#	require YAML;
+#	my $y1 = YAML::Dump($x);
+#	my $y2 = YAML::Dump($y);
+#	return 1 if $y1 eq $y2;
+#	safeout "# y1=\n$y1\ny2=\n$y2\n" if $debug;
+#
+#	require Data::Dump;
+#	my $b1 = Data::Dump::dump($x);
+#	my $b2 = Data::Dump::dump($y);
+#	return 1 if $b1 eq $b2;
+#	safeout "# b1=$b1\nb2=$b2\n" if $debug;
+#
 	my $c1 = ref2string($x);
 	my $c2 = ref2string($y);
 	return 1 if $c1 eq $c2;
-	print "c1=$c1\nc2=$c2\n";
-
-	#my $z1 = Data::XDumper::Dump($x);
-	#my $z2 = Data::XDumper::Dump($y);
-	#print "z1=$z1\nz2=$z2\n"; 
+	safeout "# c1=$c1\nc2=$c2\n" if $debug;
+#
+#	use Data::XDumper;
+#	my $z1 = Data::XDumper::Dump($x);
+#	my $z2 = Data::XDumper::Dump($y);
+#	safeout "# z1=$z1\nz2=$z2\n" if $debug;
 
 	return 0;
 }
+
+sub modern_data_compare
+{
+	# 0.02 bad, 0.10 good, don't know about in-betwen
+	return 1 if $Data::Compare::VERSION >= 0.10;  
+	print "1..0 # Skipped: Data::Compare too out-of-date, may recurse forever\n";
+	exit 0;
+}
+
+our $resource_check_magic_number = 100;
+our $resource_check_count;
+our $resource_check_first;
+our $resource_check_last;
+our $resource_check_last_okay;
+our $resource_check_okay;
+sub check_resources
+{
+	my (undef, undef, $maxrss) = getrusage(RUSAGE_SELF);
+	if ($resource_check_count++ == $resource_check_magic_number) {
+		$resource_check_okay = $okay;
+		$resource_check_first = $maxrss;
+	}
+	if ($resource_check_first && $maxrss > $resource_check_last) {
+		printf "# memory leaked since last resrouce check: %d\n", 
+			$maxrss - $resource_check_last;
+	}
+	$resource_check_last = $maxrss;
+	$resource_check_last_okay = $okay;
+}
+END	{
+	if ($resource_check_first) {
+		printf "# Memory leaked between test $resource_check_last_okay and $resource_check_okay: %d",
+			$resource_check_last - $resource_check_first;
+	}
+}
+
+END	{
+	print "# DBI bug workaround invoked: $OOPS::dbi_bug_workaround_count_debug\n"
+		if $OOPS::dbi_bug_workaround_count_debug;
+}
+
 
 sub qcheck
 {
@@ -405,7 +489,7 @@ sub rowcount
 
 sub db_drop
 {
-	if ($test_dsn =~ m{^DBI:SQLite:dbname=(/tmp/OOPStest.\d+.db)$}) {
+	if ($test_dsn =~ m{^DBI:SQLite\d*:dbname=(/tmp/OOPStest.\d+.db)$}) {
 		unlink($1);
 	} else {
 		eval {
@@ -450,6 +534,7 @@ sub resetall
 
 	$r1 = OOPS->new(%args) || confess;
 	$fe = OOPS::FrontEnd->new($r1);
+	$prefix = $r1->{table_prefix};
 }
 
 sub groupmangle
@@ -463,19 +548,20 @@ sub groupmangle
 
 	if ($action eq 'manygroups') {
 		$q = $dbh->prepare(<<END);
-			UPDATE `object` 
-			SET loadgroup =`object`;
+			UPDATE `${prefix}object` 
+			SET loadgroup = id
 END
 	} elsif ($action eq 'onegroup') {
 		$q = $dbh->prepare(<<END);
-			UPDATE `object` 
+			UPDATE `${prefix}object` 
 			SET loadgroup = 5
-			WHERE (flags & 4) = 0
+			WHERE virtual = 0
 
 END
 	} else {
 		confess;
 	}
+	confess $dbh->errstr unless $q;
 	$q->execute();
 }
 
@@ -968,6 +1054,168 @@ sub supercross1
 sub wa
 {
 	$r1->workaround27555(@_);
+}
+
+
+sub supercross7
+{
+	my ($tests, $extra) = @_;
+	$extra ||= {};
+	my $funcs = qr/(?:COMMIT|COMPARE|VIRTUAL|TODO_COMPARE)/;
+	for my $test (split(/^\s*$/m, $tests)) {
+		my @vars;
+		for(;;) {
+			if ($test =~ s/^\s*\$?(\w+):(\S*)\s*\n//) {
+				push(@vars, {
+					pvar	=> $1,
+					list	=> [ split(',', $2) ],
+				});
+				next;
+			}
+			last;
+		}
+		my $cpx = 1;
+		while ($test =~ s/\s*CP_($funcs[^;\n]*)/\n\t\t$1 if \$supercross7cp$cpx/) {
+			push(@vars, {
+				pvar	=> "supercross7cp$cpx",
+				list	=> [0, 1],
+			});
+			$cpx++;
+		}
+		$test =~ s/\A\s*\n//s;
+		$extra->{clean} = $test;
+
+		my $vlist = '';
+		for my $v (@vars) {
+			$vlist .= "\$$v->{pvar},";
+		}
+		chop($vlist);
+
+		$test .= "\nDONE\n";
+
+		my $parts = [];
+		my $last = {};
+		while ($test =~ s/(.*?)($funcs|DONE)(\S+)?([^\n]*)\n//s) {
+			my ($tpart, $func, $arg, $ifclause) = ($1, $2, $3, $4);
+			if ($tpart =~ /\S/) {
+				my $x;
+				eval "\$x = sub { my (\$root, $vlist) = \@_; $tpart }";
+				die "eval with vlist='$vlist' and tpart='$tpart': $@" if $@;
+				my $p = {
+					code	=> $x,
+					source	=> $tpart,
+				};
+				$tpart =~ s/\n\s*/\\n /g;
+				$p->{source1} = $tpart;
+				$p->{num} = $#$parts;
+				$last = $p;
+				push(@$parts, $p);
+			}
+			last if $func eq 'DONE';
+			my $cond;
+			if ($ifclause =~ /\S/) {
+				eval "\$cond = sub { my ($vlist) = \@_; return 1 $ifclause; return 0 }";
+				die "$@ on eval with $vlist and $ifclause" if $@;
+			} else {
+				$cond = sub { 1 };
+			}
+			push(@$parts, {
+				special		=> $func,
+				clause		=> $ifclause,
+				cond		=> $cond,
+				arg		=> $arg,
+				source		=> $last->{source},
+				source1		=> $last->{source1},
+				num		=> $#$parts,
+			});
+		}
+		die "test='$test'" if $test =~ /\S/s;
+		supercross7test($parts, $extra, [], @vars);
+	}
+}
+
+
+sub supercross7test
+{
+	my ($parts, $extra, $preamble, $v, @vars) = @_;
+
+	if ($v) {
+		my $l = $v->{list};
+		for my $i (@$l) {
+			$v->{list} = [ $i ];
+			push(@$preamble, $v);
+			supercross7test($parts, $extra, $preamble, @vars);
+			pop(@$preamble);
+		}
+		return;
+	} 
+
+	my $vset = '';
+	my @vlist;
+	for my $p (@$preamble) {
+		$vset .= "\t\t\$$p->{pvar}:$p->{list}[0]\n";
+		push(@vlist, $p->{list}[0]);
+	}
+	my $clean .= $vset . $extra->{clean};
+
+	my $baseroot = $extra->{baseroot} || {};
+
+	resetall;
+
+	safeout("# $clean") if $debug;
+
+	my $mroot = clone($baseroot);
+	my $proot = $r1->{named_objects}{root} = clone($mroot);
+
+	safeout(sprintf("# %d parts\n", scalar(@$parts))) if $debug;
+
+	local($tcTODO) = $tcTODO;
+
+	my $pnum = 1;
+	for my $part (@$parts) {
+		if ($part->{code}) {
+			my $code = $part->{code};
+			&$code($mroot, @vlist);
+			&$code($proot, @vlist);
+			safeout("# Running code: $part->{source}\n") if $debug;
+		} else {
+			my $ifclause = $part->{cond};
+			if ($part->{clause} =~ /\S/) {
+				print STDERR "# ifclause=$part->{clause}\n" if $debug;
+			}
+			if (&$ifclause(@vlist)) {
+				if ($part->{special} eq 'COMMIT') {
+					print STDERR "# Commit\n" if $debug;
+					$r1->commit();
+					undef $proot;
+					rcon;
+					$proot = $r1->{named_objects}{root};
+				} elsif ($part->{special} eq 'TODO_COMPARE') {
+					print STDERR "# Compare (todo)\n" if $debug;
+					todo_test(docompare($mroot, $proot), $pnum);
+				} elsif ($part->{special} eq 'COMPARE') {
+					print STDERR "# Compare\n" if $debug;
+					test(docompare($mroot, $proot), $pnum);
+				} elsif ($part->{special} eq 'VIRTUAL') {
+					if ($part->{arg}) {
+						my $arg = $part->{arg};
+						$arg =~ s/^\((.*)\)$/$1/;
+						print STDERR "# Virtualize $arg\n";
+						eval "\$r1->virtual_object($r1->{named_objects}{root}$arg)";
+						die $@ if $@;
+					} else {
+						print STDERR "# Virtualize root\n";
+						eval "\$r1->virtual_object($r1->{named_objects}{root}, 1)";
+					}
+				} else {
+					die;
+				}
+			} else {
+				print STDERR "# Negatory on $part->{special}\n" if $debug;
+			}
+		}
+		$pnum++;
+	}
 }
 
 1;
