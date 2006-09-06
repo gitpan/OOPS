@@ -144,6 +144,7 @@ The OOPS schema for mysql does not support large (>256 byte) hash
 keys.  
 
 Biggest issue: Mysql 4.1.15 (at least) detects some deadlocks very slowly.
+L<http://bugs.mysql.com/bug.php?id=20857>.
 
 =item SQLite
 
@@ -169,8 +170,9 @@ newer (version 1.x) DBD::SQLite features for handling nulls.
 
 L<http://www.hwaci.com/sw/sqlite/>
 
-Biggest issues: SQLite3 fails; SQLite2 leaks memory; both do database-level
-locking only.
+Biggest issues: SQLite3 fails (L<http://rt.cpan.org/Ticket/Display.html?id=20286>); 
+SQLite3 leaks memory (L<http://rt.cpan.org/Ticket/Display.html?id=20288>); 
+SQLite2 and SQLite3 both do database-level locking only.
 
 =back
 
@@ -1022,7 +1024,9 @@ Only supports Sybase.  Uses a fixed schema defined in XML.
 
 =item SPOPS
 
-Objects are HASHes, values are scalars only.  No nesting.
+Objects are HASHes, values are scalars only (except sometimes when
+using the LDAP backend).  No nesting.  Auto-discovers keys from database
+columns.  Has hooks for DBI, LDAP, and custom backends.
 
 =item DBIx::RecordSet
 

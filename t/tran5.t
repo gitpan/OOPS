@@ -24,9 +24,11 @@ modern_data_compare();
 BEGIN {
 	unless (eval { require Test::MultiFork}) {
 		print "1..0 # Skipped: this test requires Test::MultiFork\n";
+		exit;
 	};
 	unless (eval { require Time::HiRes}) {
 		print "1..0 # Skipped: this test requires Time::HiRes\n";
+		exit;
 	};
 
 	import Time::HiRes qw(sleep);

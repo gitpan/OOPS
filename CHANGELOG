@@ -1,3 +1,9 @@
+2006/09/06 0.1005 - minor tweaks
+
+	Removed some extraneous debugging printouts
+
+	Allow 'username' and 'pass' as aliases for 'user' and 'password' when
+	connecting to databases.
 
 2006/07/04 0.1004 - focus on: bugfixes, PostgreSQL schema change, SQLite2 vs SQLite 3
 

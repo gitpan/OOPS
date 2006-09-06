@@ -134,6 +134,7 @@ SUPPORTED PLATFORMS
 
                    Biggest issue: Mysql 4.1.15 (at least) detects some
                    deadlocks very slowly.
+                   <http://bugs.mysql.com/bug.php?id=20857>.
 
     SQLite         DBD::SQLite versions 0.x use SQLite 2.x. DBD::SQLite
                    versions 1.x use SQLite 3.x. Unfortunately, the 1.x
@@ -162,8 +163,11 @@ SUPPORTED PLATFORMS
 
                    <http://www.hwaci.com/sw/sqlite/>
 
-                   Biggest issues: SQLite3 fails; SQLite2 leaks memory; both
-                   do database-level locking only.
+                   Biggest issues: SQLite3 fails
+                   (<http://rt.cpan.org/Ticket/Display.html?id=20286>);
+                   SQLite3 leaks memory
+                   (<http://rt.cpan.org/Ticket/Display.html?id=20288>);
+                   SQLite2 and SQLite3 both do database-level locking only.
 
     Perl versions 5.8.2 through 5.8.7 are supported. Prior to 5.8.2, it
     wasn't possible to untie scalars from within the a tied scalar access
@@ -380,7 +384,9 @@ ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
     I'll pay (via paypal) US$5.00 to anyone who submits a new bug (with
     regression test) that is caused by a problem in my OOPS module. To
     qualify, bugs must be serious: they must cause data corruption, false
-    results, or program failure. Bugs must not be listed here.
+    results, or program failure. Bugs must not be listed here or be *caused*
+    by using a versions of perl, modules, or RDBMSs that are not explicitly
+    supported.
 
     I'll report the number of bounties paid in the CHANGELOG.
 
@@ -827,7 +833,9 @@ THE COMPETITION
     pop Only supports Sybase. Uses a fixed schema defined in XML.
 
     SPOPS
-        Objects are HASHes, values are scalars only. No nesting.
+        Objects are HASHes, values are scalars only (except sometimes when
+        using the LDAP backend). No nesting. Auto-discovers keys from
+        database columns. Has hooks for DBI, LDAP, and custom backends.
 
     DBIx::RecordSet
         Thin layer on top of DBI. Removes much pain from using DBI. Does not

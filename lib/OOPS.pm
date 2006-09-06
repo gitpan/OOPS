@@ -22,7 +22,7 @@
 
 package OOPS;
 
-our $VERSION = 0.1004;
+our $VERSION = 0.1005;
 our $SCHEMA_VERSION = 1004;
 
 require 5.008002;
@@ -400,8 +400,8 @@ sub dbiconnect
 		$args = $pkg->{args};
 	}
 	my $database = $args->{dbi_dsn} || $args->{DBI_DSN};
-	my $user = $args->{user} || $args->{USER};
-	my $password = $args->{password} || $args->{PASSWORD};
+	my $user = $args->{user} || $args->{username} || $args->{USER} || $args->{USERNAME};
+	my $password = $args->{pass} || $args->{password} || $args->{PASS} || $args->{PASSWORD};
 	my $prefix = $args->{table_prefix} || $args->{TABLE_PREFIX} || $ENV{OOPS_PREFIX} || '';
 	if (! defined($database)) {
 		if (defined($ENV{OOPS_DSN})) {
@@ -721,7 +721,6 @@ confess if $oclass->{$id} eq 'OOPS';
 	}
 	for my $id (keys %newptype) {
 		unless ($typesymbol{$oclass->{$id}}) {
-print "WILL BLESS $id as $oclass->{$id}\n";
 			bless $cache->{$id}, $oclass->{$id};
 			print "*$id load_object BLESS $qval{$cache->{$id}} at ".__LINE__."\n"  if $debug_blessing || $debug_cache;
 		}

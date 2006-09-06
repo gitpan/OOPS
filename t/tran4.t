@@ -22,6 +22,7 @@ BEGIN {
 
 	unless (eval { require Test::MultiFork }) {
 		print "1..0 # Skipped: this test requires Test::MultiFork\n";
+		exit;
 	}
 
 	$Test::MultiFork::inactivity = 60; 
