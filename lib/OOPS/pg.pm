@@ -18,12 +18,15 @@ sub initialize
 
 	my $dbh = $oops->{dbh};
 
-	my $tmode = $dbh->prepare('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
-	$tmode->execute() || die;
+	unless ($oops->{readonly}) {
+		my $tmode = $dbh->prepare('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
+		$tmode->execute() || die;
+	}
 
 	$oops->{counterdbh} = $oops->dbiconnect();
-	my $tmode2 = $oops->{counterdbh}->prepare('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
-	$tmode2->execute() || die $tmode2->errstr;
+	# READ COMMITTED is the default
+	# my $tmode2 = $oops->{counterdbh}->prepare('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
+	# $tmode2->execute() || die $tmode2->errstr;
 
 	$oops->{id_pool_start} = 0;
 	$oops->{id_pool_end} = 0;

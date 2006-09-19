@@ -596,6 +596,8 @@ sub check_refcount
 		$recorded{$id} = $count;
 	}
 	$recorded->finish;
+	undef $actual;
+	undef $recorded;
 	$dbh->disconnect;
 	my $err;
 	for $id (keys %actual) {

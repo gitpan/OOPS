@@ -15,7 +15,12 @@ sub initialize
 	# SET GLOBAL TRANSACTION ISOLATION LEVEL REPEATABLE READ is the default for InnoDB
 
 	my $dbh = $oops->{dbh};
-	my $tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
+	my $tmode;
+	if ($dbh->{readonly}) {
+		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
+	} else {
+		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
+	}
 	$tmode->execute() || die;
 
 	$oops->{counterdbh} = $oops->dbiconnect();

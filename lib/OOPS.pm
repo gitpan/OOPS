@@ -22,7 +22,7 @@
 
 package OOPS;
 
-our $VERSION = 0.1005;
+our $VERSION = 0.1006;
 our $SCHEMA_VERSION = 1004;
 
 require 5.008002;
@@ -150,6 +150,7 @@ our $debug_object_id		= 0;		# details of id allocation
 our $debug_getobid_context	= 0;		# stack trace for new objects
 our $debug_dbidelay		= 0;		# add small delay before changing transaction mode
 our $debug_dbi			= 0;		# DBI debug level: 0 or 1 or 2
+our @debug_traceintercept	= qw();		# Debug::TraceIntercept
 our $debug_upgrade		= 0;		# debug schema upgrades
 our $debug_initialize		= 0;		# debug initial queries
 our $debug_bigstuff		= 0;		# debug overflow table operations
@@ -181,6 +182,11 @@ tie my %qsym, 'OOPS::debug', sub { return $typesymbol{reftype(shift)} };
 
 sub OOPS::debug::TIEHASH { my $p = shift; return bless shift, $p } 
 sub OOPS::debug::FETCH { my $f = shift; return &$f(shift) } 
+
+require Debug::TraceIntercept if @debug_traceintercept;
+for my $dti_debug (@debug_traceintercept) {
+	Debug::TraceIntercept::trace($dti_debug);
+} # debug
 
 sub new
 {
@@ -228,7 +234,8 @@ sub new
 		aliascount	=> {},	# object id & pkey -> count of \aliases
 		oldalias	=> {},	# object id -> [ object id, pkey ]
 		disassociated	=> {},  # object id & pkey && refs => other disconnected ref
-		args		=> \%args,  # creation arguments
+		args		=> \%args,  		# creation arguments
+		readonly	=> $args{readonly},	# commit not allowed?
 	};
 
 	print "# CREATE $$'s OOPS $oops\n" if $debug_oops_instances;
@@ -868,6 +875,7 @@ sub rollback
 sub commit
 {
 	my $oops = shift;
+	die if $oops->{readonly};
 	$oops->save;
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
 	$oops->{dbh}->commit || die $oops->{dbh}->errstr;

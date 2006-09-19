@@ -12,7 +12,8 @@
  		dbi_dsn => $DBI_DSN, 
 		username => $username, 
 		password => $password,
-		table_prefix => "MY";
+		table_prefix => "MY",
+		readonly => 0;
 
  	$oops->commit;
 
@@ -300,6 +301,14 @@ required for all databases.
 Three ways to specify the password for DBI: as an argument; as an
 OOPS environment variable; as a DBI environment variable.  Not
 required for all databases.
+
+=item C<readonly>
+
+If true, commit() will be disabled and the transaction isolation level
+will be set to READ COMMITTED instead of SERIALIZABLE for the databases
+where this matters (mysql, PostgreSQL).  This should be used if you
+plan to scan across all the data because otherwise the whole database
+will end up locked.
 
 =item C<table_prefix> / C<$ENV{OOPS_PREFIX}>
 
@@ -1107,7 +1116,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
