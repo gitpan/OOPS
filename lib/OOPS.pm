@@ -22,7 +22,7 @@
 
 package OOPS;
 
-our $VERSION = 0.1006;
+our $VERSION = 0.1007;
 our $SCHEMA_VERSION = 1004;
 
 require 5.008002;
@@ -139,12 +139,12 @@ our $debug_write_object_context	= 0;		# traceback in write_object()
 our $debug_write_ref		= 0;
 our $debug_write_array		= 0;		# has ARRAY changed?
 our $debug_normalarray		= 0;		# tied callbacks: non-virtual hash
-our $debug_normalhash		= 0;
-our $debug_write_hash		= 0;
-our $debug_virtual_delete	= 0;
-our $debug_virtual_save		= 0;
-our $debug_virtual_hash		= 0;		# tied callbacks: virtual hash
-our $debug_virtual_ovals	= 0;		# original values of virtual has
+our $debug_normalhash		= 1;
+our $debug_write_hash		= 1;
+our $debug_virtual_delete	= 1;
+our $debug_virtual_save		= 1;
+our $debug_virtual_hash		= 1;		# tied callbacks: virtual hash
+our $debug_virtual_ovals	= 1;		# original values of virtual has
 our $debug_hashscalar		= 0;		# scalar(%tied_hash)
 our $debug_object_id		= 0;		# details of id allocation
 our $debug_getobid_context	= 0;		# stack trace for new objects
@@ -220,6 +220,7 @@ sub new
 		refcount	=> {},	# object id -> reference count
 		refchange	=> {},	# object id -> change in reference count (during commit())
 		forcesave	=> {},	# object id -> bit - for object row to be re-written  XXX redesign
+		vcache		=> [],	# objects that implement a CLEAR_CACHE() method
 		do_forcesave	=> 0,	# always update object row when attributes change
 		savedone	=> {},	# during commit() - object written?
 		refstowrite	=> [],	# during commit() - list of reference objects to save
@@ -234,6 +235,7 @@ sub new
 		aliascount	=> {},	# object id & pkey -> count of \aliases
 		oldalias	=> {},	# object id -> [ object id, pkey ]
 		disassociated	=> {},  # object id & pkey && refs => other disconnected ref
+		virtualize	=> {},	# objects to (un)virtualize
 		args		=> \%args,  		# creation arguments
 		readonly	=> $args{readonly},	# commit not allowed?
 	};
@@ -349,6 +351,10 @@ sub new
 		deleteoverrange: 2 # show
 			DELETE FROM TP_big
 			WHERE id = ? AND pkey >= ?
+		countkeys:
+			SELECT	count(*) 
+			FROM	TP_attribute
+			WHERE	id = ?
 END
 	while ($Q =~ /\G\t\t([a-z]\w*):((?:\s+\d+)*)\s*(#.*)?\n/gc) {
 		my ($qn, $binary_list, $comment) = ($1, $2);
@@ -372,7 +378,7 @@ END
 
 	if ($oops->{arraylen}{1} != $SCHEMA_VERSION) {
 		my $schema_version = $oops->{arraylen}{1};
-		die unless $schema_version =~ /\Ad+\z/;
+		die "schema version = '$schema_version'" unless $schema_version =~ /\A\d+\z/;
 		if ($oops->{args}{auto_upgrade} || $ENV{OOPS_UPGRADE}) {
 			require "OOPS/Upgrade/To$SCHEMA_VERSION.pm";
 			no strict qw(refs);
@@ -785,12 +791,40 @@ sub load_virtual_object
 	return $obj;
 }
 
+sub process_deferred_virtualize
+{
+	my ($oops) = @_;
+	for my $obj (values %{$oops->{virtualize}}) {
+		my $id = $oops->get_object_id($obj);
+		$oops->virtual_object($id, 1);
+	}
+}
+
 sub virtual_object
 {
 	my ($oops, $obj, $newval) = @_;
-	my $id = ref($obj) 
-		? $oops->get_object_id($obj) 
-		: $obj;
+
+	my $id;
+	if (ref($obj)) {
+		my $mem = refaddr($obj);
+		$id = $oops->{memory}{$mem};
+		unless ($id) {
+			# defer virtualization until later
+			my $old = exists $oops->{virtualize}{$mem};
+			if (@_ > 2) {
+				if ($newval) {
+					$oops->{virtualize}{$mem} = $obj;
+					weaken($oops->{virtualize}{$mem});
+				} else {
+					delete $oops->{virtualize}{$mem};
+				}
+			}
+			return $old;
+		}
+	} else {
+		$id = $obj;
+	}
+
 	my $old = $oops->{virtual}{$id} eq 'V';
 	print "*$id - virtual_object($newval)\n" if $debug_load_group;
 	if (@_ > 2) {
@@ -817,6 +851,15 @@ sub virtual_object
 	}
 	assertions($oops);
 	return $old;
+}
+
+# clears only safe parts of the cache
+sub clear_cache
+{
+	my ($oops) = @_;
+	for my $obj (@{$oops->{vcache}}) {
+		$obj->CLEAR_CACHE();
+	}
 }
 
 sub transaction
@@ -907,6 +950,8 @@ sub save
 	my $arraylen = $oops->{arraylen};
 	my $reftarg = $oops->{reftarg};
 	my @tied;
+
+	$oops->process_deferred_virtualize();
 
 	# 
 	# ARRAYs are always considered 'touched' and thus
@@ -1182,7 +1227,7 @@ sub write_hash
 			$oops->new_memory2key(\$obj->{$pkey}, $id, $pkey);
 			print "NEWMEMORY2KEY ".$m." := \%*$id/'$pkey' - in write_hash\n" if $debug_memory;
 		}
-		print "\%$id/$qval{$pkey} pondering... ($qval{$obj->{$pkey}})\n" if $debug_write_hash;
+		{ no warnings; print "\%$id/$qval{$pkey} pondering... ($qval{$obj->{$pkey}})\n" if $debug_write_hash; }
 		print "ref to \%$id/$qval{$pkey} is $qval{\$obj->{$pkey}}\n" if $debug_write_hash && $debug_refalias;
 		if ($ptypes && exists $ptypes->{$pkey}) {
 			print "\%$id/$pkey ...still not loaded ($ptypes->{$pkey})\n" if $debug_write_hash;
@@ -1199,7 +1244,7 @@ sub write_hash
 					if ref $obj->{$pkey};
 			} else {
 				use warnings;
-				print "\%$id/$pkey ...changed.  old value was $oldvalue->{$id}{$pkey}\n" if $debug_write_hash;
+				{ no warnings; print "\%$id/$pkey ...changed.  old value was $oldvalue->{$id}{$pkey}\n" if $debug_write_hash; }
 				$oops->update_attribute($id, $pkey, $obj->{$pkey}, undef, $oldvalue->{$id}{$pkey});
 			}
 		} elsif (exists $oldbig->{$id} && exists $oldbig->{$id}{$pkey}) {
@@ -1225,10 +1270,10 @@ sub write_hash
 		} elsif ($added) { 
 			if (exists $added->{$pkey}) {
 				# this is a new value
-				print "\%$id/$pkey ...added: $qval{$obj->{$pkey}}\n" if $debug_write_hash;
+				{ no warnings; print "\%$id/$pkey ...added: $qval{$obj->{$pkey}}\n" if $debug_write_hash; }
 				$oops->insert_attribute($id, $pkey, undef, $obj->{$pkey});
 			} else {
-				print "\%$id/$pkey ...still original value: $qval{$obj->{$pkey}}\n" if $debug_write_hash;
+				{ no warnings; print "\%$id/$pkey ...still original value: $qval{$obj->{$pkey}}\n" if $debug_write_hash; }
 			}
 		} else {
 			# this is a new value
@@ -1241,7 +1286,7 @@ sub write_hash
 		for my $pkey (keys %{$oldvalue->{$id}}) {
 			next if exists $obj->{$pkey};
 			# this pkey has gone away
-			print "\%$id/$pkey delete extra old value \%$id/$pkey ($oldvalue->{$id}{$pkey})\n" if $debug_write_hash;
+			{ no warnings; print "\%$id/$pkey delete extra old value \%$id/$pkey ($oldvalue->{$id}{$pkey})\n" if $debug_write_hash; };
 			$oops->delete_attribute($id, $pkey, $oldvalue->{$id}{$pkey});
 		}
 	}
@@ -2746,7 +2791,7 @@ sub tied_hash_reference
 		my $self = shift;
 		my $pkey = shift;
 		my ($values, $ptypes, $added, $oops, $id, $vars) = @$self;
-		print "\%$id/$pkey hDELETE ($values->{$pkey})\n" if $debug_normalhash;
+		{ no warnings; print "\%$id/$pkey hDELETE ($values->{$pkey})\n" if $debug_normalhash; }
 
 		no warnings qw(uninitialized);
 		if (exists $values->{$pkey}) {
@@ -2985,10 +3030,11 @@ sub tied_hash_reference
 		if (defined $pkey) {
 			no warnings qw(uninitialized);
 			confess if exists $ptypes->{$pkey} && tied $ptypes->{$pkey};
+			print "\%$id hNEXTKEY = ".$qval{$pkey}."\n" if $debug_normalhash;
 		} else {
 			delete $vars->{ineach};
+			print "\%$id hNEXTKEY = undef\n" if $debug_normalhash;
 		}
-		print "\%$id hNEXTKEY = ".$qval{$pkey}."\n" if $debug_normalhash;
 		$oops->assertions;
 		return $pkey;
 	}
@@ -2997,7 +3043,7 @@ sub tied_hash_reference
 	{
 		my $self = shift;
 		my ($values, $ptypes, $added, $oops, $id, $vars) = @$self;
-		return scalar(%$values);
+		return scalar(keys(%$values));
 	}
 
 }
@@ -3154,6 +3200,7 @@ sub tied_hash_reference
 		my ($pkg, $oops, $id) = @_;
 		my $self = bless [ $oops, $id, {}, {}, {}, {}, {}, {} ], $pkg;
 		weaken $self->[0];
+		push(@{$oops->{vcache}}, $self);
 		print "CREATE DemandHash \%$id $self\n" if $debug_free_tied;
 		$tiedvars{$self} = "%$id ".longmess if $debug_tiedvars;
 		$oops->assertions;
@@ -3524,16 +3571,18 @@ sub tied_hash_reference
 		return () unless $dbe;
 		my ($name, $pval, $ptype);
 		if (ref($dbe) && (($pkey, $pval, $ptype) = $dbe->fetchrow_array())) {
-			print "%*$id vNEXTKEY: query: '$pkey' ($pval/$ptype)\n" if $debug_virtual_hash || $debug_demand_iterator;
+			{ no warnings; print "%*$id vNEXTKEY: query: '$pkey' ($pval/$ptype)\n" if $debug_virtual_hash || $debug_demand_iterator; }
 			no warnings qw(uninitialized);
 			if (exists $dcache->{$pkey}) {
 				print "%$id - nextpkey deleted\n" if $debug_demand_iterator;
 				goto &NEXTKEY;
 			}
-			if ($ptype) {
-				$ovcache->{$pkey} = [ $pval, $ptype ];
-			} else {
-				$rcache->{$pkey} = $pval;
+			unless ($oops->{args}{less_caching}) {
+				if ($ptype) {
+					$ovcache->{$pkey} = [ $pval, $ptype ];
+				} else {
+					$rcache->{$pkey} = $pval;
+				}
 			}
 			if (exists $wcache->{$pkey}) {
 				print "%$id - nextpkey is in wcache\n" if $debug_demand_iterator;
@@ -3556,36 +3605,77 @@ sub tied_hash_reference
 	{
 		my ($self) = @_;
 		my ($oops, $id, $rcache, $wcache, $necache, $ovcache, $dcache, $vars) = @$self;
-		print "%*$id vSCALAR = 1 - rcache\n" if %$rcache && $debug_hashscalar;
-		return 1 if %$rcache;
-		print "%*$id vSCALAR = 1 - wcache\n" if %$wcache && $debug_hashscalar;
-		return 1 if %$wcache;
-		print "%*$id vSCALAR = 0 - alldelete\n" if $vars->{alldelete} && $debug_hashscalar;
-		return 0 if $vars->{alldelete};
-		for my $k (keys %$ovcache) {
-			next if exists $dcache->{$k};
-			print "%*$id vSCALAR = 1 - '$k' in ovcache\n" if %$ovcache && $debug_hashscalar;
-			return 1;
+
+		if ($vars->{alldelete}) {
+			printf "%%*%d' vSCALAR: previous alldelete, returning %d (%s)\n", $id, scalar(keys(%$wcache)), scalar(%$wcache) if $debug_virtual_hash;
+			return scalar(keys(%$wcache));
 		}
-		my ($pkey, $pval, $ptype);
-		my $objectloadQ = $oops->query('objectload', execute => $id);
-		while (($pkey, $pval, $ptype) = $objectloadQ->fetchrow_array()) {
-			no warnings qw(uninitialized);
-			next if exists $dcache->{$pkey};
-			if ($ptype) {
-				$ovcache->{$pkey} = [ $pval, $ptype ];
-			} else {
-				$rcache->{$pkey} = $pval;
+
+		unless ($vars->{originalKeyCount}) {
+			my $originalCountQ = $oops->query('countkeys', execute => [ $id ]);
+			($vars->{originalKeyCount}) = $originalCountQ->fetchrow_array();
+			$originalCountQ->finish();
+		}
+
+		my $doriginal = 0;
+		my $loadpkeyQ;
+		my %done;
+		for my $pkey (keys %$dcache, keys %$wcache) {
+			next if $done{$pkey}++;
+			if (exists $rcache->{$pkey}) {
+				print "%*$id/'$pkey' vSCALAR: in rcache\n"  if $debug_virtual_hash;
+				$doriginal++;
+				next;
 			}
-			$objectloadQ->finish();
-			print "%*$id vSCALAR = 1 - found '$pkey'\n" if $debug_hashscalar;
-			return 1;
+			if (exists $necache->{$pkey}) {
+				print "%*$id/'$pkey' vSCALAR: in rcache\n"  if $debug_virtual_hash;
+				next;
+			}
+			$loadpkeyQ = $oops->query('loadpkey')
+				unless $loadpkeyQ;
+			$loadpkeyQ->execute($id, $pkey);
+			my ($pval, $ptype);
+			if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
+				if ($ptype) {
+					$ovcache->{$pkey} = [ $pval, $ptype ];
+				} else {
+					$rcache->{$pkey} = $pval;
+				}
+				$doriginal++;
+				print "%*$id/'$pkey' vSCALAR: found in db\n" if $debug_virtual_hash;
+			} else {
+				$necache->{$pkey} = 1;
+				print "%*$id/'$pkey' vSCALAR: not found in db\n" if $debug_virtual_hash;
+			}
 		}
-		$objectloadQ->finish();
-		print "%*$id vSCALAR = 0 - none found\n" if $debug_hashscalar;
-		return 0;
+		$loadpkeyQ->finish() if $loadpkeyQ;
+
+		print "%*$id' vSCALAR: original key count = $vars->{originalKeyCount}\n" if $debug_virtual_hash;
+		print "%*$id' vSCALAR: deleted/replaced count: $doriginal\n" if $debug_virtual_hash;
+		printf "%%*%d' vSCALAR: write cache count: %d (%s)\n", $id, scalar(keys(%$wcache)), scalar(%$wcache) if $debug_virtual_hash;
+
+		my $r = $vars->{originalKeyCount} - $doriginal + keys %$wcache;
+		print "%*$id' vSCALAR: result = $r\n" if $debug_virtual_hash;
+		return $r;
 	}
 
+	sub CLEAR_CACHE
+	{
+		my ($self) = @_;
+		my ($oops, $id, $rcache, $wcache, $necache, $ovcache, $dcache, $vars) = @$self;
+		$necache = ();
+		$ovcache = ();
+		if (%$dcache or $vars->{keyrefs}) {
+			for my $i (keys %$rcache) {
+				delete $rcache->{$i}
+					unless	exists $dcache->{$i}
+					or	exists $vars->{keyrefs}{$i}
+			}
+		} else {
+			$rcache = ();
+		}
+		print "%*$id vCLEAR_CACHE\n" if $debug_virtual_hash;
+	}
 }
 #	-	-	-	-	-	-	-	-	-	-	- 
 {
@@ -3628,6 +3718,7 @@ sub tied_hash_reference
 	sub workaround27555	{ my $self = shift; my $tied = tied %$self; $tied->[0]->workaround27555(@_); }
 	sub load_object		{ my $self = shift; my $tied = tied %$self; $tied->[0]->load_object(@_); } 
 	sub dbh			{ my $self = shift; my $tied = tied %$self; $tied->[0]->{dbh} }
+	sub clear_cache		{ my $self = shift; my $tied = tied %$self; $tied->[0]->clear_cache(@_); }
 
 }
 

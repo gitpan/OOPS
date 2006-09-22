@@ -150,17 +150,15 @@ L<http://bugs.mysql.com/bug.php?id=20857>.
 =item SQLite
 
 DBD::SQLite versions 0.x use SQLite 2.x.  DBD::SQLite versions 1.x use
-SQLite 3.x.  Unfortunately, the 1.x versions of DBD::SQLite that have been
-tested with OOPS have failed to pass.  They die consistently a few thousand
-transactions in on certain tests.  Use DBD::SQLite2 instead.
+SQLite 3.x.  DBD::SQLite versions 1.x leak file descriptors and will 
+eventually die if you create use and destroy too many OOPS instances.
+This prefents DBD::SQLite version 1.x from passing the OOPS regression tests.
 
 If you're using OOPS 1.003 and DBD::SQLite 0.x then upgrade OOPS to 1.004 and
 switch to DBD::SQLite2.  Make both changes at the same time.
 
 OOPS 1.004 has been tested with DBD::SQLite2 0.33.
 OOPS 1.003 was tested with DBD::SQLite 0.31.
-Use DBD::SQLite 1.x at your own risk -- versions 1.11 and 1.12 cannot pass
-the OOPS regression tests.
 
 DBD::SQLite2 is not 8-bit clean with respect to C<\0>.  OOPS uses a DBD::SQLite2
 feature to translate binary nulls.  A side-effect is that backslash
@@ -307,8 +305,15 @@ required for all databases.
 If true, commit() will be disabled and the transaction isolation level
 will be set to READ COMMITTED instead of SERIALIZABLE for the databases
 where this matters (mysql, PostgreSQL).  This should be used if you
-plan to scan across all the data because otherwise the whole database
+plan to scan across large amounts of data because everythign you read
 will end up locked.
+
+=item C<less_caching>
+
+If true, iterating over the keys of a virtual hash (see C<virtual_object>)
+will not cache the key values in memory.  If your virtual hash is too
+big to fit in memory, this is a very good idea.  Alternatively, you can
+use the C<clear_cache> method (below).
 
 =item C<table_prefix> / C<$ENV{OOPS_PREFIX}>
 
@@ -442,9 +447,15 @@ This will load a persistent object by number.  It returns the object
 or undef if the object doesn't exists.  This function is provided for
 those who want to hand-write queries.
 
+=item C<-E<gt>clear_cache()>
+
+This will clear out some of the cache that oops maintains.   It is useful
+if you're iterating over the keys of a large virtual object and don't want to
+overflow memory.
+
 =back
 
-=head1 ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
+=head1 LIMITATIONS, ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
 
 OOPS has been thoroughly tested.  The regression suite is very well
 developed: there is twice as much code in the test suite as there is in
@@ -467,6 +478,18 @@ I'll report the number of bounties paid in the CHANGELOG.
 
 There is a mailing list for OOPS.  Send a message to 
 oops-subscribe@idiom.com to subscribe.
+
+=head2 Limitations
+
+OOPS caches in memory bit of data that is pulled in during a transaction.
+For C<virtual_object> hash'es only, there are ways to prevent absolutely
+everything from being cached (the C<less_caching> contructor agrument and
+the C<clear_cache> method) but for other objects you need to have enough
+memory to hold everything you touch.
+
+You can only call -E<gt>commit once per OOPS instance.  The cache is 
+emptied when the OOPS instance is destroyed.  Together this means that
+OOPS will be loading up its cache over and over.
 
 =head2 Known bugs in OOPS
 

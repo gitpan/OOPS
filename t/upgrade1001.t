@@ -202,6 +202,6 @@ sub count_bits
 		$bits++ if $x & 1;
 		$x <<= 1;
 	}
-print "bits for $_[0] = $bits\n";
+# print "bits for $_[0] = $bits\n";
 	return $bits;
 }

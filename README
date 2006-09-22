@@ -138,20 +138,18 @@ SUPPORTED PLATFORMS
                    <http://bugs.mysql.com/bug.php?id=20857>.
 
     SQLite         DBD::SQLite versions 0.x use SQLite 2.x. DBD::SQLite
-                   versions 1.x use SQLite 3.x. Unfortunately, the 1.x
-                   versions of DBD::SQLite that have been tested with OOPS
-                   have failed to pass. They die consistently a few thousand
-                   transactions in on certain tests. Use DBD::SQLite2
-                   instead.
+                   versions 1.x use SQLite 3.x. DBD::SQLite versions 1.x
+                   leak file descriptors and will eventually die if you
+                   create use and destroy too many OOPS instances. This
+                   prefents DBD::SQLite version 1.x from passing the OOPS
+                   regression tests.
 
                    If you're using OOPS 1.003 and DBD::SQLite 0.x then
                    upgrade OOPS to 1.004 and switch to DBD::SQLite2. Make
                    both changes at the same time.
 
                    OOPS 1.004 has been tested with DBD::SQLite2 0.33. OOPS
-                   1.003 was tested with DBD::SQLite 0.31. Use DBD::SQLite
-                   1.x at your own risk -- versions 1.11 and 1.12 cannot
-                   pass the OOPS regression tests.
+                   1.003 was tested with DBD::SQLite 0.31.
 
                    DBD::SQLite2 is not 8-bit clean with respect to "\0".
                    OOPS uses a DBD::SQLite2 feature to translate binary
@@ -286,8 +284,14 @@ PARAMETERS FOR NEW
         If true, commit() will be disabled and the transaction isolation
         level will be set to READ COMMITTED instead of SERIALIZABLE for the
         databases where this matters (mysql, PostgreSQL). This should be
-        used if you plan to scan across all the data because otherwise the
-        whole database will end up locked.
+        used if you plan to scan across large amounts of data because
+        everythign you read will end up locked.
+
+    "less_caching"
+        If true, iterating over the keys of a virtual hash (see
+        "virtual_object") will not cache the key values in memory. If your
+        virtual hash is too big to fit in memory, this is a very good idea.
+        Alternatively, you can use the "clear_cache" method (below).
 
     "table_prefix" / $ENV{OOPS_PREFIX}
         OOPS allows a prefix to be supplied for it's internal table names.
@@ -381,7 +385,12 @@ PUBLIC OBJECT METHODS
         or undef if the object doesn't exists. This function is provided for
         those who want to hand-write queries.
 
-ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
+    "->clear_cache()"
+        This will clear out some of the cache that oops maintains. It is
+        useful if you're iterating over the keys of a large virtual object
+        and don't want to overflow memory.
+
+LIMITATIONS, ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
     OOPS has been thoroughly tested. The regression suite is very well
     developed: there is twice as much code in the test suite as there is in
     the module itself. The suite does over 1.5million tests. On my fastest
@@ -401,6 +410,17 @@ ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
   Community
     There is a mailing list for OOPS. Send a message to
     oops-subscribe@idiom.com to subscribe.
+
+  Limitations
+    OOPS caches in memory bit of data that is pulled in during a
+    transaction. For "virtual_object" hash'es only, there are ways to
+    prevent absolutely everything from being cached (the "less_caching"
+    contructor agrument and the "clear_cache" method) but for other objects
+    you need to have enough memory to hold everything you touch.
+
+    You can only call ->commit once per OOPS instance. The cache is emptied
+    when the OOPS instance is destroyed. Together this means that OOPS will
+    be loading up its cache over and over.
 
   Known bugs in OOPS
     memory leaks

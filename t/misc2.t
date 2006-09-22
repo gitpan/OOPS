@@ -33,12 +33,73 @@ use OOPS::TestCommon;
 
 modern_data_compare();
 
-print "1..326\n";
+print "1..489\n";
+
 
 resetall; # --------------------------------------------------
 {
 	my $tests = <<'END';
-		virtual:0,1
+		VIRTUAL
+		$root->{x} = 'y';
+		COMMIT
+		COMPARE
+
+		VIRTUAL
+		%$root = ();
+		COMMIT
+		COMPARE
+
+		CP_VIRTUAL
+		%$root = ();
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{a} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{b} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{c} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{d} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{e} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		$root->{f} = betterkeys(%$root);
+		COMPARE
+		COMMIT
+		COMPARE
+		delete $root->{b};
+		delete $root->{c};
+		$root->{g} = betterkeys(%$root);
+		CP_COMMIT
+		CP_COMPARE
+		delete $root->{d};
+		$root->{h} = betterkeys(%$root);
+		$root->{i} = betterkeys(%$root);
+		$root->{x} = 1;
+		$root->{y} = 1;
+		$root->{z} = 1;
+		COMPARE
+		COMMIT
+		COMPARE
+		delete $root->{x};
+		delete $root->{y};
+		delete $root->{z};
+		$root->{h} = betterkeys(%$root);
+		$root->{i} = betterkeys(%$root);
+		COMPARE
+
+		CP_VIRTUAL
 		$tcTODO = "Mysql columns are a bit narrow" if $r1->{dbms} eq 'mysql';
 		%$root = ();
 		my $x = getref(%$root, 'FOO23' x 57);
@@ -93,8 +154,8 @@ resetall; # --------------------------------------------------
 		CP_COMMIT
 		COMPARE
 
-		virtual:0,1
 		$x:0,1
+		CP_VIRTUAL
 		%$root = (
 			hdaslj4 => { aslx => 'slda4x'},
 		);

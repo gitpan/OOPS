@@ -128,7 +128,7 @@ sub query
 	my ($oops, $q, %args) = @_;
 
 	my $query;
-	confess unless $query = $oops->{queries}{$q};
+	confess "no query '$q'" unless $query = $oops->{queries}{$q};
 
 	$query =~ s/TP_/$oops->{table_prefix}/g;
 

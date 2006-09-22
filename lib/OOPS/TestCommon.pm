@@ -42,6 +42,7 @@ package OOPS::TestCommon;
 	modern_data_compare
 	check_resources
 	safeout
+	betterkeys
 	$test_dsn
 	$test_user
 	$test_pass
@@ -333,7 +334,7 @@ sub docompare
 	my $c1 = ref2string($x);
 	my $c2 = ref2string($y);
 	return 1 if $c1 eq $c2;
-	safeout "# c1=$c1\nc2=$c2\n" if $debug;
+	safeout "# c1=$c1\n# c2=$c2\n" if $debug;
 #
 #	use Data::XDumper;
 #	my $z1 = Data::XDumper::Dump($x);
@@ -1063,7 +1064,7 @@ sub supercross7
 {
 	my ($tests, $extra) = @_;
 	$extra ||= {};
-	my $funcs = qr/(?:COMMIT|COMPARE|VIRTUAL|TODO_COMPARE)/;
+	my $funcs = qr/(?:COMMIT|COMPARE|VIRTUAL|TODO_COMPARE|CLEAR_CACHE)/;
 	for my $test (split(/^\s*$/m, $tests)) {
 		my @vars;
 		for(;;) {
@@ -1136,6 +1137,17 @@ sub supercross7
 	}
 }
 
+sub betterkeys(\%)
+{
+	my ($kref) = shift;
+	my $tied = tied(%$kref);
+	return keys(%$kref) if wantarray;
+	if ($tied && $tied->can('SCALAR')) {
+		return scalar(%$kref);
+	} else {
+		return keys(%$kref);
+	}
+}
 
 sub supercross7test
 {
@@ -1202,13 +1214,17 @@ sub supercross7test
 					if ($part->{arg}) {
 						my $arg = $part->{arg};
 						$arg =~ s/^\((.*)\)$/$1/;
-						print STDERR "# Virtualize $arg\n";
-						eval "\$r1->virtual_object($r1->{named_objects}{root}$arg)";
+						print STDERR "# Virtualize $arg\n" if $debug;
+						eval "\$r1->virtual_object(\$proot$arg)";
 						die $@ if $@;
 					} else {
-						print STDERR "# Virtualize root\n";
-						eval "\$r1->virtual_object($r1->{named_objects}{root}, 1)";
+						print STDERR "# Virtualize root\n" if $debug;
+						eval { $r1->virtual_object($proot, 1) };
+						die $@ if $@;
 					}
+				} elsif ($part->{special} eq 'CLEAR_CACHE') {
+					eval "\$r1->clear_cache()";
+					die $@ if $@;
 				} else {
 					die;
 				}
