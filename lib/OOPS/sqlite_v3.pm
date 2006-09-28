@@ -87,6 +87,11 @@ END
 	return $x;
 }
 
+sub lock
+{
+	return 1;
+}
+
 # subroutine
 sub table_list
 {

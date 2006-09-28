@@ -49,6 +49,10 @@ t/tran3.t
 t/tran4.t
 t/tran5.t
 t/tran5a.t
+t/tran6a.t
+t/tran6b.t
+t/tran6c.t
+t/tran6d.t
 t/upgrade1001.t
 t/upgrade1003.t
 t/z-array.t

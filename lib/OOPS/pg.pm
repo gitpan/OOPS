@@ -120,6 +120,14 @@ sub initial_query_set
 			UPDATE TP_big
 			SET pval = ?
 			WHERE id = ? AND pkey = ?
+		lock_object:
+			SELECT loadgroup 
+			FROM TP_object
+			WHERE id = ? FOR UPDATE 
+		lock_attribute:
+			SELECT ptype
+			FROM TP_attribute
+			WHERE id = ? AND pkey = ? FOR UPDATE
 END
 }
 
@@ -165,6 +173,22 @@ sub query
 	}
 
 	return $sth;
+}
+
+sub lock_object
+{
+	my ($oops, $id) = @_;
+	my $q = $oops->query('lock_object', execute => [ $id ]);
+	(undef) = $q->fetchrow_array;
+	$q->finish()
+}
+
+sub lock_attribute
+{
+	my ($oops, $id, $pkey) = @_;
+	my $q = $oops->query('lock_attribute', execute => [ $id, $pkey ]);
+	(undef) = $q->fetchrow_array;
+	$q->finish()
 }
 
 sub save_big

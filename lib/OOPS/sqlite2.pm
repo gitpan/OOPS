@@ -84,6 +84,11 @@ END
 	return $x;
 }
 
+sub lock
+{
+	return 1;
+}
+
 sub table_list
 {
 	return (qw(TP_object TP_attribute TP_big));

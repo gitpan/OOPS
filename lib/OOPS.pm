@@ -11,18 +11,18 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 # 
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 # 
 # This software is available without the GPL: please write if you need
 # a non-GPL license.  All submissions of patches must come with a 
 # copyright grant so that David Sharnoff remains able to change the
-# license on OOPS.
+# license at will.
 
 package OOPS;
 
-our $VERSION = 0.1007;
+our $VERSION = 0.1008;
 our $SCHEMA_VERSION = 1004;
 
 require 5.008002;
@@ -139,12 +139,12 @@ our $debug_write_object_context	= 0;		# traceback in write_object()
 our $debug_write_ref		= 0;
 our $debug_write_array		= 0;		# has ARRAY changed?
 our $debug_normalarray		= 0;		# tied callbacks: non-virtual hash
-our $debug_normalhash		= 1;
-our $debug_write_hash		= 1;
-our $debug_virtual_delete	= 1;
-our $debug_virtual_save		= 1;
-our $debug_virtual_hash		= 1;		# tied callbacks: virtual hash
-our $debug_virtual_ovals	= 1;		# original values of virtual has
+our $debug_normalhash		= 0;
+our $debug_write_hash		= 0;
+our $debug_virtual_delete	= 0;
+our $debug_virtual_save		= 0;
+our $debug_virtual_hash		= 0;		# tied callbacks: virtual hash
+our $debug_virtual_ovals	= 0;		# original values of virtual has
 our $debug_hashscalar		= 0;		# scalar(%tied_hash)
 our $debug_object_id		= 0;		# details of id allocation
 our $debug_getobid_context	= 0;		# stack trace for new objects
@@ -852,6 +852,27 @@ sub virtual_object
 	assertions($oops);
 	return $old;
 }
+
+sub lock {
+	my ($oops, $thing) = @_;
+	croak "lock() requires a reference" unless ref($thing);
+	my $mem = refaddr($thing);
+	if ((my $r = $oops->{memory2key}{$mem})) {
+		my ($id, $key) = @$r;
+		return $oops->lock_attribute($id, $key);
+	}
+	if ((my $id = $oops->{memory}{$mem})) {
+		
+		return $oops->lock_object($id);
+	}
+	if ((my ($tiedaddr, $key) = tied_hash_reference($_[0]))) {
+		my $id = $oops->{memory}{$tiedaddr} || $oops->{new_memory}{$tiedaddr};
+		return 0 unless $id;
+		return $oops->lock_attribute($id, $key);
+	}
+	return 0;
+}
+
 
 # clears only safe parts of the cache
 sub clear_cache

@@ -285,13 +285,15 @@ PARAMETERS FOR NEW
         level will be set to READ COMMITTED instead of SERIALIZABLE for the
         databases where this matters (mysql, PostgreSQL). This should be
         used if you plan to scan across large amounts of data because
-        everythign you read will end up locked.
+        everythign you read will end up locked. This feature is still
+        experimental (not covered by the test suite).
 
     "less_caching"
         If true, iterating over the keys of a virtual hash (see
         "virtual_object") will not cache the key values in memory. If your
         virtual hash is too big to fit in memory, this is a very good idea.
-        Alternatively, you can use the "clear_cache" method (below).
+        Alternatively, you can use the "clear_cache" method (below). This
+        feature is still experimental (not covered by the test suite).
 
     "table_prefix" / $ENV{OOPS_PREFIX}
         OOPS allows a prefix to be supplied for it's internal table names.
@@ -388,7 +390,18 @@ PUBLIC OBJECT METHODS
     "->clear_cache()"
         This will clear out some of the cache that oops maintains. It is
         useful if you're iterating over the keys of a large virtual object
-        and don't want to overflow memory.
+        and don't want to overflow memory. This feature is still
+        experimental (not covered by the test suite).
+
+    "->lock($ref)"
+        Lock an object or a scalar. While this is never needed for
+        transactional consistentcy within the OOPS data, it can be useful
+        for transactions that have external side-effects like sending an
+        email. In theory, if you pre-lock everything you might change, your
+        transaction will not need to be rolled back due to deadlock. When
+        you lock an object, it is the object record that is locked, not the
+        contents. Locking "\%hash" won't another process from modifying
+        "$hash->{key}". Lock "\$hash->{key}" if you want that.
 
 LIMITATIONS, ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
     OOPS has been thoroughly tested. The regression suite is very well

@@ -1,4 +1,14 @@
 
+2006/09/27 - 0.1008 - new feature: lock()
+
+	New methods:
+
+		lock() places a write-lock on a object or scalar.
+
+	Other changes:
+		
+		Added new test suites (tran6a.t, tran6b.t, tran6c.t, tran6d.t)
+
 2006/09/22 - 0.1007 - minor features, fixes, repass the full regression suite
 
 	New methods
