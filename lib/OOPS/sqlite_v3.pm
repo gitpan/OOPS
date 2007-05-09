@@ -5,7 +5,7 @@
 
 package OOPS::sqlite_v3;
 
-@ISA = qw(OOPS Exporter);
+@ISA = qw(OOPS::DBO Exporter);
 @EXPORT = qw(
 	tabledefs
 	table_list
@@ -20,13 +20,18 @@ use warnings;
 use Carp qw(confess);
 
 our $big_blob_size = 900*1024;
+our $enable_fd_leak_workaround = 500;
+our $invocations = 0;
+
+sub tmode {}
 
 sub initialize
 {
-	my $oops = shift;
+	my $dbo = shift;
 
-	my $dbh = $oops->{dbh};
+	my $dbh = $dbo->{dbh};
 	$dbh->{sqlite_handle_binary_nulls} = 1;
+
 
 	# 
 	# SQLite will sometimes error out with a locked database
@@ -36,13 +41,49 @@ sub initialize
 	#
 	$dbh->func(10_000, 'busy_timeout');
 
-	if ($oops->{args}{default_synchronous} || $ENV{OOPS_SYNC}) {
-		my $sm = $dbh->prepare("PRAGMA default_synchronous = $oops->{args}{default_synchronous};") || confess $dbh->errstr;
+	my $sync = $dbo->{default_synchronous} || $ENV{OOPS_SYNC};
+	if ($sync) {
+		my $sm = $dbh->prepare("PRAGMA default_synchronous = $sync;") || confess $dbh->errstr;
 		$sm->execute || confess $sm->errstr;
 	}
 
-	#my $tmode = $dbh->prepare('END TRANSACTION; BEGIN TRANSACTION ON CONFLICT ROLLBACK') || confess;
-	#$tmode->execute() || die $tmode->errstr;
+	$dbo->{sqlite_version} = 3;
+
+	return unless $invocations++ >= $enable_fd_leak_workaround;
+	return unless $enable_fd_leak_workaround;
+	return undef unless -d "/proc/$$/fd";
+	return undef unless $dbo->{database} =~ /dbname=(\S+)/;
+
+	my $dbfile = $1;
+	my ($dev, $ino) = (stat($dbfile))[0,1];
+
+	my @r;
+	local(*D);
+	opendir(D, "/proc/$$/fd") || return undef;
+	@r = sort { $a <=> $b } grep($_ ne "." && $_ ne "..", readdir(D));
+	closedir(D);
+
+	require POSIX;
+
+	pop(@r); pop(@r); pop(@r); pop(@r);
+
+	#
+	# The very-recently created sqlite open file is a
+	# pipe rather than a link so this won't accidently
+	# close it.
+	#
+	for my $r (@r) {
+		next unless $r > $enable_fd_leak_workaround;
+		my $f = readlink("/proc/$$/fd/$r");
+		next unless $f;
+		unless ($f eq $dbfile) {
+			my ($fddev, $fdino) = (stat($f))[0,1];
+			next unless $fddev == $dev;
+			next unless $fdino == $ino;
+		}
+		warn "Closing fd probably leaked by SQLite ($r);";
+		POSIX::close($r);
+	}
 }
 
 # subroutine
@@ -60,7 +101,8 @@ sub tabledefs
 		rfe		CHAR(1),		# reserved for future expansion
 		alen		INT,			# array length
 		refs		INT, 			# references
-		counter		SMALLINT
+		counter		INT,
+		gcgeneration	INT DEFAULT 1
 		);
 
 	CREATE INDEX TP_group_index ON TP_object (loadgroup);
@@ -101,27 +143,23 @@ sub table_list
 # subroutine
 sub db_initial_values
 {
+	require OOPS::Setup;
 	return <<END;
-	INSERT INTO TP_object values(100, 100, 'HASH', 'H', 'V', '0', '0', 0, 1, 1);
-	INSERT INTO TP_attribute values(2, 'last reserved object id', 100, 'R');
+	INSERT INTO TP_object values(100, 100, 'HASH', 'H', 'V', '0', '0', 0, 1, 1, $OOPS::gcgenstart);
+	INSERT INTO TP_attribute values(2, 'last reserved object id', $OOPS::last_reserved_oid, 'R');
 END
 }
 
 sub allocate_id
 {
-	my $oops = shift;
+	my $dbo = shift;
 	return undef;
 }
 
 sub post_new_object
 {
-	my $oops = shift;
-	return $oops->{dbh}->func('last_insert_rowid');
-}
-
-sub byebye
-{
-	my $oops = shift;
+	my $dbo = shift;
+	return $dbo->{dbh}->func('last_insert_rowid');
 }
 
 our $retry_count = 0;
@@ -143,6 +181,20 @@ sub initial_query_set
 			WHERE id = ? AND pkey = ?
 END
 }
+
+sub rebless
+{
+	my ($dbo, $oops) = @_;
+	bless $oops, 'OOPS::sqlite2::subclass';
+}
+
+package OOPS::sqlite2::subclass;
+
+use strict;
+use warnings;
+use Carp;
+
+our @ISA = qw(OOPS Exporter);
 
 sub load_big
 {

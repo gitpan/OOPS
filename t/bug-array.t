@@ -1,5 +1,7 @@
 #!/usr/bin/perl
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
+
 print "1..1\n";
 
 my $x = [ 'a', 'b', 'c', 'd', 'e' ];

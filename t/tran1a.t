@@ -1,5 +1,6 @@
 #!/usr/bin/perl -I../lib -I..
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
@@ -17,7 +18,7 @@ use Clone::PP qw(clone);
 modern_data_compare();
 
 BEGIN	{
-	if ($dbms =~ /sqlite/) {
+	if ($dbms =~ /sqlite|mysql/) {
 		print "1..0 # Skipped: this test not supported on $dbms\n";
 		exit;
 	}

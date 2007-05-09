@@ -8,8 +8,8 @@ use warnings;
 use Carp qw(confess);
 
 BEGIN {
-	filter_add(bless [], 'OOPS::SelfFilter')
-		unless $OOPS::SelfFilter::defeat;
+	Filter::Util::Call::filter_add(\&OOPS::OOPS1003::SelfFilter::filter)
+		unless $OOPS::OOPS1003::SelfFilter::defeat;
 }
 
 sub initialize

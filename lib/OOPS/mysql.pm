@@ -1,32 +1,50 @@
 
 package OOPS::mysql;
 
-@ISA = qw(OOPS);
+@ISA = qw(OOPS::DBO);
 
 use strict;
 use warnings;
 
-sub initialize
+sub tmode
 {
-	my $oops = shift;
-
-	$oops->{do_forcesave} = 1;
+	my ($dbo, $dbh, $readonly) = @_;
+	$dbh = $dbo->{dbh}
+		unless $dbh;
+	$readonly = $dbo->{readonly}
+		if $dbo && ! defined $readonly;
 
 	# SET GLOBAL TRANSACTION ISOLATION LEVEL REPEATABLE READ is the default for InnoDB
-
-	my $dbh = $oops->{dbh};
 	my $tmode;
-	if ($dbh->{readonly}) {
-		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
+	if ($readonly) {
+		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED') || die $dbh->errstr;
 	} else {
-		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
+		$tmode = $dbh->prepare('SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die $dbh->errstr;
 	}
-	$tmode->execute() || die;
-
-	$oops->{counterdbh} = $oops->dbiconnect();
-	$oops->{id_pool_start} = 0;
-	$oops->{id_pool_end} = 0;
+	$tmode->execute() || die $dbh->errstr;
 }
+
+sub initialize
+{
+	my $dbo = shift;
+
+	# $dbo->tmode;
+
+	$dbo->{counterdbh} = $dbo->dbiconnect(%$dbo, readonly => 1);
+	$dbo->{id_pool_start} = 0;
+	$dbo->{id_pool_end} = 0;
+}
+
+sub disconnect
+{
+	my ($dbo) = @_;
+	$dbo->SUPER::disconnect();
+	return unless $dbo->{counterdbh};
+	$dbo->{counterdbh}->disconnect();
+	delete $dbo->{counterdbh};
+}
+
+sub do_forcesave { 1 };
 
 sub tabledefs
 {
@@ -43,6 +61,7 @@ sub tabledefs
 		alen		INT,
 		refs		INT, 
 		counter		SMALLINT,
+		gcgeneration	INT DEFAULT 1,
 		PRIMARY KEY	(id), 
 		INDEX		TP_group_index (loadgroup)) 
 				TYPE = InnoDB;
@@ -79,6 +98,18 @@ sub table_list
 	return (qw(TP_object TP_attribute TP_big TP_counters));
 }
 
+sub clean_query
+{
+	my ($dbo, $query) = @_;
+	if ($query =~ /\bSELECT\b/i && ! $dbo->{readyonly}) {
+		$query =~ s/;//;
+		# $query .= " LOCK IN SHARE MODE";
+		$query .= " FOR UPDATE";
+	}
+	1 while $query =~ s/  +/ /g;  # query log is easier to debug
+	return $dbo->SUPER::clean_query($query);
+}
+
 sub initial_query_set
 {
 	return <<END;
@@ -113,59 +144,59 @@ END
 
 sub db_initial_values
 {
+	require OOPS::Setup;
 	return <<END;
-	INSERT INTO TP_counters values ('objectid', 101);
+	INSERT INTO TP_counters values ('objectid', $OOPS::last_reserved_oid + 1);
 END
 }
 
 sub allocate_id
 {
-	my $oops = shift;
+	my $dbo = shift;
 	my $id;
-	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
-		$id = $oops->{id_pool_start}++;
+	if ($dbo->{id_pool_start} && $dbo->{id_pool_start} < $dbo->{id_pool_end}) {
+		$id = $dbo->{id_pool_start}++;
 		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
 	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::id_alloc_size);
-		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
+		my $allocate_idQ = $dbo->query('allocate_id', dbh => $dbo->{counterdbh}, execute => $OOPS::id_alloc_size);
+		my $get_idQ = $dbo->query('get_id', dbh => $dbo->{counterdbh}, execute => []);
 		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
 		$get_idQ->finish;
-		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
-		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
+		$dbo->{id_pool_start} = $id+1;
+		$dbo->{id_pool_end} = $id+$OOPS::id_alloc_size;
+		$dbo->{counterdbh}->commit || die $dbo->{counterdbh}->errstr;
+		print "in allocate_id, new pool: $dbo->{id_pool_start} to $dbo->{id_pool_end}\n" if $OOPS::debug_object_id;
 		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
 	}
 	return $id;
 }
 
+sub post_new_object
+{
+	my $dbo = shift;
+	return $_[0];
+}
+
 sub lock_object
 {
-	my ($oops, $id) = @_;
-	my $q = $oops->query('lock_object', execute => [ $id ]);
+	my ($dbo, $id) = @_;
+	my $q = $dbo->query('lock_object', execute => [ $id ]);
 	(undef) = $q->fetchrow_array;
 	$q->finish()
 }
 
 sub lock_attribute
 {
-	my ($oops, $id, $pkey) = @_;
-	my $q = $oops->query('lock_attribute', execute => [ $id, $pkey ]);
+	my ($dbo, $id, $pkey) = @_;
+	my $q = $dbo->query('lock_attribute', execute => [ $id, $pkey ]);
 	(undef) = $q->fetchrow_array;
 	$q->finish()
 }
 
-
-sub post_new_object
-{
-	my $oops = shift;
-	return $_[0];
-}
-
 sub byebye
 {
-	my $oops = shift;
-	$oops->{counterdbh}->disconnect() if $oops->{counterdbh};
+	my $dbo = shift;
+	$dbo->{counterdbh}->disconnect() if $dbo->{counterdbh};
 }
 
 

@@ -1,5 +1,6 @@
 #!/usr/bin/perl -I../lib -I.. -I../Test-MultiFork/blib/lib
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;

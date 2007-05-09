@@ -37,6 +37,8 @@ package OOPS::TestCommon;
 	db_drop
 	supercross1
 	supercross7
+	supercross8
+	cs8compare
 	rvsamesame
 	ref2string
 	modern_data_compare
@@ -66,7 +68,7 @@ BEGIN {
 
 use OOPS;
 use OOPS::Setup;
-import Clone::PP qw(clone); 
+# import Clone::PP qw(clone); 
 use Carp::Heavy; # weird error sometimes w/o this
 use Carp qw(confess);
 use Scalar::Util qw(reftype refaddr);
@@ -129,7 +131,22 @@ delete $SIG{__DIE__};
 
 our $basecount;
 
-our $dbms = OOPS->initial_setup(%args) || confess;
+our $preserve_old_stuff;
+our $dbms;
+unless ($preserve_old_stuff) {
+	db_drop();
+	$dbms = OOPS->initial_setup(%args) || confess;
+}
+
+#
+# Most of the DBD's are too verbose about complaints that
+# are hard to avoid with these tests.  They make the output
+# too ugly.
+#
+if ($dbms eq 'sqlite' || $dbms eq 'sqlite2' || $dbms eq 'pg') {
+	$SIG{__WARN__} = sub {0}
+		if $ENV{HARNESS_ACTIVE};
+}
 
 $OOPS::bigcutoff = 50;
 $OOPS::sqlite::big_blob_size = 60;
@@ -243,7 +260,7 @@ sub todo_test
 	$okay++;
 }
 
-sub test
+sub test($;$)
 {
 	my ($true, $msg) = @_;
 
@@ -262,6 +279,12 @@ sub test
 
 	russian_roulette(! $true)
 		unless $tcTODO;
+}
+
+sub clone
+{
+	local($SIG{__WARN__}) = sub { 0 };
+	Clone::PP::clone(@_);
 }
 
 sub rvsamesame
@@ -490,19 +513,18 @@ sub rowcount
 
 sub db_drop
 {
+	nocon();
+	my $dbo = OOPS->dboconnect(%args);
+	my @list = $dbo->table_list;
 	if ($test_dsn =~ m{^DBI:SQLite\d*:dbname=(/tmp/OOPStest.\d+.db)$}) {
 		unlink($1);
 	} else {
-		eval {
-			OOPS->db_domany(\%OOPS::TestCommon::args, <<END);
-				DROP TABLE TP_object;
-				DROP TABLE TP_attribute;
-				DROP TABLE TP_big;
-END
-		};
-		eval { OOPS->db_domany(\%OOPS::TestCommon::args, "DROP TABLE TP_counters") }
-			unless $dbms eq 'sqlite';
+		for my $table (@list) {
+			eval { $dbo->db_domany("DROP TABLE $table", nonfatal => 1, silent => $ENV{HARNESS_ACTIVE}); };
+			$dbo->commit();
+		}
 	}
+	$dbo->disconnect();
 }
 
 sub resetall
@@ -523,10 +545,11 @@ sub resetall
 	for my $t (&{"OOPS::${dbms}::table_list"}()) {
 		$x .= "DELETE FROM $t;\n";
 	}
-	OOPS->db_domany({ %args }, 
+	OOPS::DBO->db_domany(
 		$x 
 		. OOPS->db_initial_values() 
-		. &{"OOPS::${dbms}::db_initial_values"}());
+		. &{"OOPS::${dbms}::db_initial_values"}(),
+		args => { %args });
 	use strict;
 	
 
@@ -535,99 +558,100 @@ sub resetall
 
 	$r1 = OOPS->new(%args) || confess;
 	$fe = OOPS::FrontEnd->new($r1);
-	$prefix = $r1->{table_prefix};
+	$prefix = $r1->{dbo}{table_prefix};
 }
 
 sub groupmangle
 {
 	my ($action) = @_;
 
-	my $r = OOPS->new(%args) || confess;
-	my $dbh = $r->{dbh};
+	my $dbo = OOPS->dboconnect(%args) || confess;
 
 	my $q;
 
 	if ($action eq 'manygroups') {
-		$q = $dbh->prepare(<<END);
-			UPDATE `${prefix}object` 
+		$q = $dbo->adhoc_query(<<END);
+			UPDATE TP_object
 			SET loadgroup = id
 END
 	} elsif ($action eq 'onegroup') {
-		$q = $dbh->prepare(<<END);
-			UPDATE `${prefix}object` 
+		$q = $dbo->adhoc_query(<<END);
+			UPDATE TP_object
 			SET loadgroup = 5
 			WHERE virtual = 0
-
 END
 	} else {
 		confess;
 	}
-	confess $dbh->errstr unless $q;
+	confess $dbo->errstr unless $q;
 	$q->execute();
 }
 
 sub AUTODISC::DESTROY
 {
 	my $self = shift;
-	my $dbh = $self->{dbh};
-	$dbh->disconnect();
+	my $dbo = $self->{dbo};
+	$dbo->disconnect();
 }
 
 sub check_refcount
 {
 	my ($msg, $die) = @_;
-	my $dbh = OOPS->dbiconnect(%args) || confess;
-	my $autodisc = bless { dbh => $dbh }, 'AUTODISC';
-	my $error = 0;
-	my $aq = "SELECT pval, count(*) FROM TP_attribute WHERE ptype = 'R' GROUP BY pval";
-	$aq =~ s/TP_/$args{table_prefix}/g;
-	my $rq = "SELECT id, refs FROM TP_object";
-	$rq =~ s/TP_/$args{table_prefix}/g;
-	my $actual = $dbh->prepare($aq) || confess $dbh->errstr;
-	$actual->execute() || confess $actual->errstr;
-	my (%actual, %recorded);
-	my ($id, $count);
-	while (($id, $count) = $actual->fetchrow_array()) {
-		$actual{$id} = $count;
-	}
-	$actual->finish;
-	my $recorded = $dbh->prepare($rq) || confess $dbh->errstr;
-	$recorded->execute() || confess $recorded->errstr;
-	while (($id, $count) = $recorded->fetchrow_array()) {
-		$recorded{$id} = $count;
-	}
-	$recorded->finish;
-	undef $actual;
-	undef $recorded;
-	$dbh->disconnect;
-	my $err;
-	for $id (keys %actual) {
-		no warnings qw(uninitialized);
-		if ($recorded{$id} != $actual{$id}) {
-			$err .= "reference count of *$id is off: $recorded{$id} recorded, but should be $actual{$id}\n";
+	transaction(sub {
+		my ($dbo) = (OOPS::DBO->dbiconnect(%args))[3] || confess;
+		$dbo->{dbh}->{RaiseError} = 1;
+		my $autodisc = bless { dbo => $dbo }, 'AUTODISC';
+		my $error = 0;
+		my (%actual, %recorded);
+		my ($id, $count);
+		my $recorded = $dbo->adhoc_query(<<END) || die;
+			SELECT id, refs FROM TP_object ORDER BY id
+END
+		$recorded->execute() || confess $recorded->errstr;
+		while (($id, $count) = $recorded->fetchrow_array()) {
+			$recorded{$id} = $count;
+		}
+		undef $recorded;
+		my $actual = $dbo->adhoc_query(<<END) || die;
+			SELECT pval, count(*) FROM TP_attribute WHERE ptype = 'R' GROUP BY pval
+END
+		$actual->execute() || confess $actual->errstr;
+		while (($id, $count) = $actual->fetchrow_array()) {
+			$actual{$id} = $count;
+		}
+		undef $actual;
+		undef $dbo;
+		undef $autodisc;
+		my $err;
+		for $id (keys %actual) {
+			no warnings qw(uninitialized);
+			if ($recorded{$id} != $actual{$id}) {
+				$err .= "reference count of *$id is off: $recorded{$id} recorded, but should be $actual{$id}\n";
+				$error++;
+			}
+			delete $recorded{$id};
+		}
+		for $id (keys %recorded) {
+			next if $recorded{$id} == 0;
+			$err .= "reference count of *$id is off: $recorded{$id} recorded, but should be zero\n";
 			$error++;
 		}
-		delete $recorded{$id};
-	}
-	for $id (keys %recorded) {
-		$err .= "reference count of *$id is off: $recorded{$id} recorded, but should be 0\n";
-		$error++;
-	}
-	#my $line = (caller(@_ ? $_[0] : 1))[2];
-	my $line = eline;
-	$msg ||= '';
-	$msg =~ s/\A\s*(.*?)\s*\Z/$1/s;
-	$msg =~ s/\n\s*/\\n /g;
-	$msg = "- $msg" if $msg;
-	if ($err) {
-		print "not ok $okay - line$line # reference counts are off - $error object $msg\n";
-		confess "$err " if $die;
-		print $err if $debug;
-		russian_roulette(1);
-	} else {
-		print "ok $okay - line$line # refcount $msg\n";
-	}
-	$okay++;
+		#my $line = (caller(@_ ? $_[0] : 1))[2];
+		my $line = eline;
+		$msg ||= '';
+		$msg =~ s/\A\s*(.*?)\s*\Z/$1/s;
+		$msg =~ s/\n\s*/\\n /g;
+		$msg = "- $msg" if $msg;
+		if ($err) {
+			print "not ok $okay - line$line # reference counts are off - $error object $msg\n";
+			confess "$err " if $die;
+			print $err if $debug;
+			russian_roulette(1);
+		} else {
+			print "ok $okay - line$line # refcount $msg\n";
+		}
+		$okay++;
+	});
 }
 
 sub nocon
@@ -1234,6 +1258,65 @@ sub supercross7test
 		}
 		$pnum++;
 	}
+}
+
+#
+# BEGIN TRANSACTION
+#	stuff
+#	COMMIT
+# END TRANSACTION
+#
+# COMPARE (cannot be in a transaction block)
+#
+sub supercross8
+{
+	my ($tests, $baseroot) = @_;
+
+	my ($pkg) = caller();
+
+	resetall;
+
+	my $mroot = clone($baseroot);
+	my $proot = $r1->{named_objects}{root} = clone($mroot);
+
+	$r1->commit;
+	rcon;
+
+	1 while $tests =~ s/BEGIN TRANSACTION(.*?)END TRANSACTION.*?\n/cs8tblock($1)/se;
+	1 while $tests =~ s/COMPARE/cs8compare(\$mroot);/;
+
+#	print $tests;
+
+	eval "package $pkg;\n$tests";
+	die if $@;
+}
+
+sub cs8compare
+{
+	my ($mroot) = @_;
+	test(transaction (sub {
+		rcon;
+		docompare($mroot, $r1->{named_objects}{root});
+	}));
+}
+
+sub cs8tblock
+{
+	my ($tblock) = @_;
+	my $mem = $tblock;
+
+	$tblock =~ s/\bCOMMIT\b/\$r1->commit;/g;
+	$tblock =~ s/\$root/\$proot/g;
+
+	$mem =~ s/\bCOMMIT\b//g;
+	$mem =~ s/\n/ /g;
+	$mem =~ s/\$root/\$mroot/g;
+
+	return <<END
+transaction(sub { rcon; \$proot = \$r1->{named_objects}{root};
+			$tblock
+		}); $mem
+END
 }
 
 1;

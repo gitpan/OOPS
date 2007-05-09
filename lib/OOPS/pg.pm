@@ -1,8 +1,10 @@
 
 package OOPS::pg;
 
-@ISA = qw(OOPS);
+@ISA = qw(OOPS::DBO);
 
+require OOPS;
+use OOPS::DBO;
 use strict;
 use warnings;
 use Carp qw(confess);
@@ -12,36 +14,39 @@ BEGIN {
 		unless $OOPS::SelfFilter::defeat;
 }
 
-sub initialize
+sub tmode
 {
-	my $oops = shift;
+	my ($dbo, $dbh) = @_;
+	$dbh = $dbo->{dbh} unless $dbh;
 
-	my $dbh = $oops->{dbh};
-
-	unless ($oops->{readonly}) {
+	# READ COMMITTED is the default
+	# my $tmode2 = $dbo->{counterdbh}->prepare('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
+	# $tmode2->execute() || die $tmode2->errstr;
+	unless ($dbo->{readonly}) {
 		my $tmode = $dbh->prepare('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
 		$tmode->execute() || die;
 	}
-
-	$oops->{counterdbh} = $oops->dbiconnect();
-	# READ COMMITTED is the default
-	# my $tmode2 = $oops->{counterdbh}->prepare('SET TRANSACTION ISOLATION LEVEL READ COMMITTED') || die;
-	# $tmode2->execute() || die $tmode2->errstr;
-
-	$oops->{id_pool_start} = 0;
-	$oops->{id_pool_end} = 0;
-
-	my $queries = $oops->{queries};
-	for my $q (keys %$queries) {
-		my $count = ($queries->{$q} =~ tr/?/?/);
-		$oops->{param_count}{$q} = $count;
-		$oops->{binary_params}{$q} = [];
-		for my $i (split(' ',$oops->{binary_q_list}{$q})) {
-			next unless $i > 0;
-			$oops->{binary_params}{$q}[$i] = 1;
-		}
-	}
 }
+
+sub initialize
+{
+	my ($dbo) = @_;
+
+	# $dbo->tmode;
+
+	$dbo->{counterdbh} = OOPS::dbiconnect(undef, %$dbo);
+
+	$dbo->{id_pool_start} = 0;
+	$dbo->{id_pool_end} = 0;
+}
+
+#
+# Postgres SERIALIZABLE doesn't really work: adding a new
+# row that would have been returned by query in another process
+# is allowed.  Setting this to 1 forces the object record
+# to be updated every time the object contents change.
+#
+sub do_forcesave { 1 };
 
 sub tabledefs
 {
@@ -58,6 +63,7 @@ sub tabledefs
 		alen		INT,			# array length
 		refs		INT, 			# references
 		counter		SMALLINT,
+		gcgeneration	INT DEFAULT 1,
 		PRIMARY KEY (id));
 
 	CREATE INDEX TP_group_index ON TP_object (loadgroup);
@@ -94,8 +100,9 @@ sub table_list
 
 sub db_initial_values
 {
+	require OOPS::Setup;
 	return <<END;
-	INSERT INTO TP_counters values ('objectid', 101);
+	INSERT INTO TP_counters values ('objectid', $OOPS::last_reserved_oid + 1);
 END
 }
 
@@ -131,19 +138,57 @@ sub initial_query_set
 END
 }
 
+
+#
+# bind_param only has to happen once.
+#
 sub query
 {
-	my ($oops, $q, %args) = @_;
+	my ($dbo, $q, %args) = @_;
 
 	my $query;
-	confess "no query '$q'" unless $query = $oops->{queries}{$q};
+	my $dbh;
+	my $sth;
+	my $fresh = 0;
 
-	$query =~ s/TP_/$oops->{table_prefix}/g;
+	$dbo->query_debug('pg', $q, %args);
 
-	$oops->query_debug('pg', $q, %args);
+	if (($sth = $dbo->{cached_queries}{$q})) {
+		# great
+		if ($sth->{Active}) {
+			print "Query $q was still active\n" if $OOPS::debug_queries;
+			delete $dbo->{cached_queries}{$q};
+			delete $dbo->{bind_done}{$q};
+			return query($dbo, $q, %args);
+		}
+		if ($dbo->{binary_q_list}{$q} && ! $dbo->{bind_done}{$q}) {
+			$fresh = 1;
+		}
+	} elsif (($query = $dbo->{queries}{$q})) {
+		1 while $query =~ s/DBO:CAST:PG2INT\(($pmatch)\)/CAST($1 AS integer)/s;
+		1 while $query =~ s/DBO:CAST:PGBYTEA2INT\(($pmatch)\)/CAST(encode($1, 'escape') AS integer)/s;
+		1 while $query =~ s/DBO:CAST:PG2BYTEA\(($pmatch)\)/decode(CAST($1 AS text), 'escape')/s;
+		die if $query =~ /\bDBO:[A-Z]+:PG/;
+		$query = $dbo->clean_query($query);
+		$dbh = $args{dbh} || $dbo->{dbh};
+		$sth = $dbh->prepare($query) || die $dbh->errstr;
+		$dbo->{cached_queries}{$q} = $sth;
+		$fresh = 1;
+	} else {
+		confess "no query <$q>";
+	}
 
-	my $dbh = $args{dbh} || $oops->{dbh};
-	my $sth = $dbh->prepare_cached($query, undef, 3) || die $dbh->errstr;
+	if ($dbo->{binary_q_list}{$q} && ! $dbo->{binary_params}{$q}) {
+		$dbo->{binary_params}{$q} = [];
+		for my $i (grep($_ > 0, split(' ', $dbo->{binary_q_list}{$q}))) {
+			$dbo->{binary_params}{$q}[$i] = 1;
+		}
+	}
+
+
+	my $debug_x = ++$dbo->{invoke_count}{$q};
+	print $dbo->{binary_q_list}{$q} ? "BINARY: $q - $debug_x/$fresh\n" : "NOT B: $q - $debug_x/$fresh\n"
+		if $OOPS::debug_dbd;
 
 	if (exists $args{execute}) {
 		my @a = defined($args{execute})
@@ -153,15 +198,17 @@ sub query
 			: ();
 
 		my $e;
-		if ($oops->{binary_params}{$q}) {
+		if ($dbo->{binary_params}{$q} && $fresh) {
 			for (my $i = 0; $i <= $#a; $i++) {
-				if ($oops->{binary_params}{$q}[$i+1]) {
+				if ($dbo->{binary_params}{$q}[$i+1]) {
 					$sth->bind_param($i+1, $a[$i], 
 						{ pg_type => DBD::Pg::PG_BYTEA });
+				printf "Bind-param %s #%d - binary\n", $q, $i+1 if $OOPS::debug_dbd;
 				} else {
 					$sth->bind_param($i+1, $a[$i]);
 				}
 			}
+			$dbo->{bind_done}{$q} = 1;
 			$sth->execute() or $e = "Could Not Execute '$query' with '@a':" . ($sth->errstr);
 		} else {
 			$sth->execute(@a) or $e = "could not execute '$query' with '@a':".$sth->errstr;
@@ -170,6 +217,9 @@ sub query
 			$e =~ s/\n/\\n /g; # debug
 			confess($e);
 		}
+	} elsif ($dbo->{binary_params}{$q} && $fresh) {
+		print "Using wrapper...\n" if $OOPS::debug_dbd;
+		return OOPS::pg::sth->new($sth, $q, $dbo->{binary_params}{$q}, \$dbo->{bind_done}{$q});
 	}
 
 	return $sth;
@@ -177,52 +227,36 @@ sub query
 
 sub lock_object
 {
-	my ($oops, $id) = @_;
-	my $q = $oops->query('lock_object', execute => [ $id ]);
+	my ($dbo, $id) = @_;
+	my $q = $dbo->query('lock_object', execute => [ $id ]);
 	(undef) = $q->fetchrow_array;
 	$q->finish()
 }
 
 sub lock_attribute
 {
-	my ($oops, $id, $pkey) = @_;
-	my $q = $oops->query('lock_attribute', execute => [ $id, $pkey ]);
+	my ($dbo, $id, $pkey) = @_;
+	my $q = $dbo->query('lock_attribute', execute => [ $id, $pkey ]);
 	(undef) = $q->fetchrow_array;
 	$q->finish()
 }
 
-sub save_big
-{
-	my $oops = shift;
-	my $id = shift;
-	my $pkey = shift;
-	$oops->query('savebig', execute => [ $id, $pkey, $_[0] ]);
-}
-
-sub update_big
-{
-	my $oops = shift;
-	my $id = shift;
-	my $pkey = shift;
-	my $updatebigQ = $oops->query('updatebig', execute => [ $_[0], $id, $pkey ]);
-}
-
 sub allocate_id
 {
-	my $oops = shift;
+	my $dbo = shift;
 	my $id;
-	if ($oops->{id_pool_start} && $oops->{id_pool_start} < $oops->{id_pool_end}) {
-		$id = $oops->{id_pool_start}++;
+	if ($dbo->{id_pool_start} && $dbo->{id_pool_start} < $dbo->{id_pool_end}) {
+		$id = $dbo->{id_pool_start}++;
 		print "in allocate_id, allocating $id from pool\n" if $OOPS::debug_object_id;
 	} else {
-		my $allocate_idQ = $oops->query('allocate_id', dbh => $oops->{counterdbh}, execute => $OOPS::id_alloc_size);
-		my $get_idQ = $oops->query('get_id', dbh => $oops->{counterdbh}, execute => []);
+		my $allocate_idQ = $dbo->query('allocate_id', dbh => $dbo->{counterdbh}, execute => $OOPS::id_alloc_size);
+		my $get_idQ = $dbo->query('get_id', dbh => $dbo->{counterdbh}, execute => []);
 		(($id) = $get_idQ->fetchrow_array) || die $get_idQ->errstr;
 		$get_idQ->finish;
-		$oops->{id_pool_start} = $id+1;
-		$oops->{id_pool_end} = $id+$OOPS::id_alloc_size;
-		$oops->{counterdbh}->commit || die $oops->{counterdbh}->errstr;
-		print "in allocate_id, new pool: $oops->{id_pool_start} to $oops->{id_pool_end}\n" if $OOPS::debug_object_id;
+		$dbo->{id_pool_start} = $id+1;
+		$dbo->{id_pool_end} = $id+$OOPS::id_alloc_size;
+		$dbo->{counterdbh}->commit || die $dbo->{counterdbh}->errstr;
+		print "in allocate_id, new pool: $dbo->{id_pool_start} to $dbo->{id_pool_end}\n" if $OOPS::debug_object_id;
 		print "in allocate_id, allocated $id from before pool\n" if $OOPS::debug_object_id;
 	}
 	return $id;
@@ -230,14 +264,59 @@ sub allocate_id
 
 sub post_new_object
 {
-	my $oops = shift;
+	my $dbo = shift;
 	return $_[0];
 }
 
-sub byebye
+sub disconnect
 {
-	my $oops = shift;
-	$oops->{counterdbh}->disconnect() if $oops->{counterdbh};
+	my $dbo = shift;
+	$dbo->{counterdbh}->disconnect() if $dbo->{counterdbh};
+	delete $dbo->{counterdbh};
+	$dbo->SUPER::disconnect();
+}
+
+package OOPS::pg::sth;
+
+use strict;
+use warnings;
+use UNIVERSAL qw(can);
+use Carp qw(confess);
+
+sub new
+{
+	my ($pkg, $sth, $q, $binary_params, $doneref) = @_;
+	return bless [ $sth, $q, $binary_params, $doneref];
+}
+
+sub execute
+{
+	my ($self, @values) = @_;
+	my ($sth, $q, $binary_params, $doneref) = @$self;
+	$$doneref = 2;
+
+	for (my $i = 0; $i <= $#values; $i++) {
+		die if ref $values[$i];
+		if ($binary_params->[$i+1]) {
+			$sth->bind_param($i+1, $values[$i], 
+				{ pg_type => DBD::Pg::PG_BYTEA });
+			printf "Bind-param %s #%d - binary\n", $q, $i+1 if $OOPS::debug_dbd;
+		} else {
+			$sth->bind_param($i+1, $values[$i]);
+		}
+	}
+	@$self = ($sth);
+	$sth->execute();
+}
+
+sub AUTOLOAD
+{
+	my $self = shift;
+	our $AUTOLOAD;
+	my $a = $AUTOLOAD;
+	$a =~ s/.*:://;
+	my $method = can($self->[0],$a) || can($self->[0], $AUTOLOAD) || confess "cannot find method $a for $self->[0]";
+	&$method($self->[0], @_);
 }
 
 1;

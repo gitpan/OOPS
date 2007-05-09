@@ -2,28 +2,33 @@
 package OOPS::Upgrade::To1004;
 
 use OOPS::Setup;
+use strict;
+use warnings;
 
 sub upgrade
 {
-	my ($oops, $oldversion) = @_;
+	my ($oldversion, %args) = @_;
 
 	if ($oldversion ne '1003') {
 		require OOPS::Upgrade::To1003;
-		OOPS::Upgrade::To1003::upgrade($oops, $oldversion);
+		OOPS::Upgrade::To1003::upgrade($oldversion, %args);
 	}
 
 	print STDERR "# Schema upgrade to 1004...\n" if $OOPS::debug_upgrade;
 
-	$oops->disconnect() if $oops->{dbh};
-	my $dbh = $oops->dbiconnect();
-	my $prefix = $oops->{table_prefix};
+	my $dbo = OOPS::DBO->dboconnect(%args);
+	my $dbh = $dbo->{dbh};
+	my $prefix = $dbo->{table_prefix};
 
-	if ($oops->{dbms} eq 'pg') {
+	if ($dbo->{dbms} eq 'pg') {
 
-		unless($dbh->do("DROP TABLE ${prefix}temp;")) {
-			$dbh->disconnect();
-			$dbh = $oops->dbiconnect();
+		eval { $dbo->do("DROP TABLE ${prefix}temp;") };
+		if ($@) {
+			$dbo->disconnect();
+			$dbo = $dbo->dboconnect(%args);
+			$dbh = $dbo->{dbh};
 		}
+
 
 		my ($oldver) = $dbh->selectrow_array(<<END) or die $dbh->errstr;
 			SELECT	alen
@@ -71,26 +76,7 @@ END
 
 	$dbh->commit() or die $dbh->errstr;
 	$dbh->disconnect();
-
-	$oops->{arraylen}{1} = '1004';	# in case it is saved
 }
 
 1;
 
-__END__
-		my $qread = $dbh->prepare(<<END) or die $dbh->errstr;
-			SELECT id, pkey, DECODE(pval, 'escape')
-			FROM $oops->{table_prefix}temp
-END
-		$qread->execute() or die $dbh->errstr;
-		my $qwrite = $dbh->prepare(<<END) or die $dbh->errstr;
-			INSERT INTO $oops->{table_prefix}big
-			VALUES (?, ?, ?)
-END
-		my $count = 0;
-		while ((my $id, $pkey, $pval) = $qread->fetchrow_array()) {
-print STDERR "CONVERTED $id, '$pkey'...\n";
-			$qwrite->execute($id, $pkey, $pval)
-				or die $dbh->errstr;
-			$count++;
-		}

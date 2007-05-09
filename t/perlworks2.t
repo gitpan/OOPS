@@ -2,13 +2,14 @@
 
 use warnings;
 use strict;
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 
 #
 # these are tests that confirm how perl works.
 #
 
 use Scalar::Util qw(refaddr reftype blessed);
-use Test::More tests => 85;
+use Test::More tests => 92;
 
 #
 # I can't find a case where a delete doesn't
@@ -679,6 +680,41 @@ print "# block at ".__LINE__."\n";
 	ok(exists($x{c}));
 	ok(! exists($x{d}));
 }
+
+#
+# Local work on lexical keys?
+#
+{
+	print "# block at ".__LINE__."\n";
+	my $foo = {
+		a	=> 1,
+		b	=> 2,
+		c	=> 3,
+	};
+
+	sub x11 
+	{
+		my ($f) = @_;
+		local($f->{a}) = 6;
+		ok($f->{a} == 6);
+		ok($f->{a} == $foo->{a});
+		x12($f);
+	}
+
+	sub x12
+	{
+		my ($f) = @_;
+		local($f->{b}) = 7;
+		ok($f->{a} == 6);
+		ok($f->{b} == 7);
+		ok($f->{a} == $foo->{a});
+	}
+
+	x11($foo);
+	ok($foo->{a} == 1);
+	ok($foo->{b} == 2);
+}
+
 
 package Hash1;
 

@@ -1,4 +1,62 @@
 
+???? - 0.2002 - major release: garbage collection, bugfixes, mysql
+
+	New features:
+
+		* Garbage collection.  It's a separate module and
+		  must be explicitly invoked.  It allows you to clean up 
+		  persistent data that leaks.  OOPS::GC
+
+		* Reference integrety checker.   OOPS::Fsck.
+
+		* new iterator function: walk_hash()
+
+		* new helper class: OOPS::TxHash
+
+	Mysql:
+		
+		It turns out that mysql SERIALIZABLE locking does
+		not currently work.  To get OOPS to function properly,
+		it is necessary to add "FOR UPDATE" to every SELECT.
+		This essentially single-threads access to the database
+		becauase every OOPS instance reads a common row.
+
+		See: http://bugs.mysql.com/?id=28029
+
+	Bugfixes:
+
+		Calling virtual_object on something and then 
+		deleting the something and the calling commit()
+		bombed.
+
+		lock() didn't make it to the public interface -- oops!
+
+		Multiple changes to the reference counts of unloaded
+		objects would corrupt the unloaded objects.
+
+		virtual_object() requests were not always saved.
+
+		readonly mode didn't work on mysql.
+
+		$ENV{OOPS_SYNC} was ignored.
+
+		There is now a workaround for SQLite 1.x's file descriptor
+		leak.
+
+	Cleanup:
+		
+		TestCommon.pm is no longer installed.
+
+	New tests:
+
+		Garbage collection.
+
+		Reference counting
+
+		Old versions still work
+
+		New iterator.
+
 2006/09/27 - 0.1008 - new feature: lock()
 
 	New methods:

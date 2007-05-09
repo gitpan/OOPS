@@ -1,5 +1,5 @@
 
-# Copyright(C) 2004-2006 David Muir Sharnoff <muir@idiom.com>
+# Copyright(C) 2004-2007 David Muir Sharnoff <muir@idiom.com>
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,24 +22,25 @@
 
 package OOPS;
 
-our $VERSION = 0.1008;
-our $SCHEMA_VERSION = 1004;
+our $VERSION = 0.2002;
+our $SCHEMA_VERSION = 1005;
 
 require 5.008002;
 require Exporter;
-@EXPORT = qw(transaction getref);
+@EXPORT = qw(transaction getref walk_hash);
 @ISA = qw(Exporter);
-@EXPORT_OK = qw(transaction $transaction_maxtries $transfailrx dbiconnect workaround27555);
+@EXPORT_OK = qw(transaction $transaction_maxtries $transfailrx dbiconnect dboconnect workaround27555 walk_hash);
 
 use DBI;
 use strict;
 use warnings;
 #use diagnostics;
-use Carp qw(confess longmess verbose croak);
+use Carp qw(confess longmess verbose croak longmess);
 use Scalar::Util qw(refaddr reftype blessed weaken);
 use Hash::Util qw(lock_keys);
 use B qw(svref_2object);
 use UNIVERSAL qw(can);
+require OOPS::DBO;
 
 #
 # This is a self source filter.
@@ -63,24 +64,35 @@ our $demandthreshold = 500;
 our $oopses = 0;
 my $nopkey = 'nopkey';
 our $warnings = 1;
+our $transaction_tries = 0;
 our $transaction_maxtries = 15;
+our $transaction_failure_sleep = 0.5;
+our $transaction_failure_maxsleep = 10;
+our @transaction_rollback;
 our $dbi_bug_workaround_count_debug = 0;
+our $gc_overflow_id = 4;
 
 #
 # How do you know the database is deadlocked?
 #
-#	mysql		Deadlock found when trying to get lock
+#	mysql		
+#			Deadlock found when trying to get lock
+#			Lock wait timeout exceeded; try restarting transaction
+# 	 		:Duplicate entry
 #
-#	PostgreSQL	ERROR:  duplicate key violates unique constraint
-#
-#	SQLite3		database is locked\(5\) at dbdimp.c line 
-#			unable to open database file\(1\) at dbdimp.c  ** Random failure
-#
-# 	? 		Duplicate entry
+#	PostgreSQL	
 #			ERROR:  could not serialize access due to concurrent update
+#			ERROR:  deadlock detected
+#			ERROR:  duplicate key violates unique constraint
+#
+#	SQLite3		
+#			database is locked\(1\) at dbdimp.c line 
+#			database is locked\(5\) at dbdimp.c line 
+#			unable to open database file\(1\) at dbdimp.c  (Random failure, doesn't mean deadlock)
+#
 #			
 
-our $transfailrx = qr/Deadlock found when trying to get lock|Duplicate entry|ERROR:  duplicate key violates unique constraint|ERROR:  could not serialize access due to concurrent update|database is locked\(\d+\) at dbdimp\.c line |unable to open database file\(\d+\) at dbdimp\.c line/;
+our $transfailrx = qr/Deadlock found when trying to get lock|ERROR:  could not serialize access due to concurrent update|database is locked\(\d+\) at dbdimp\.c line |unable to open database file\(\d+\) at dbdimp\.c line|ERROR:  deadlock detected|Lock wait timeout exceeded; try restarting transaction|ERROR:  duplicate key violates unique constraint|:Duplicate entry/;
 
 our $id_alloc_size = 10;
 
@@ -120,7 +132,8 @@ our $debug_memory		= 0;		# touches: memory
 our $debug_memory2		= 0;		# the memory set/clear routines
 our $debug_cache		= 0;		# touches: cache
 our $debug_oldobject		= 0;		# touches: oldobject
-our $debug_refcount		= 0;		# touches: refchange or refcount
+our $debug_refcount		= 0;		# touches: refmore, refless or refcount
+our $debug_gcgeneration		= 0;		# touches: gc generation
 our $debug_touched		= 0;		# touches: touched
 our $debug_commit		= 0;		# save objects
 our $debug_demand_iterator	= 0;
@@ -153,9 +166,10 @@ our $debug_dbi			= 0;		# DBI debug level: 0 or 1 or 2
 our @debug_traceintercept	= qw();		# Debug::TraceIntercept
 our $debug_upgrade		= 0;		# debug schema upgrades
 our $debug_initialize		= 0;		# debug initial queries
+our $debug_setup		= 0;		# debug database initialization
 our $debug_bigstuff		= 0;		# debug overflow table operations
-our $debug_queries		= 0;		# bitfield: 1=all (default==regex match), 2=print query name, 4=print query, 8=print args
-
+our $debug_dbd			= 0;		# debug mysql.pm, pg.pm, etc.
+our $debug_queries		= 0;		# bitfield: 1=select all (vs default==regex match), 2=print query name, 4=print query, 8=print args, 16=varients, 32=full query log
 our $debug_q_regex_target	= 'query';	# query regex match on 'comment', 'query', or 'data'
 our $debug_q_regex		= qr/insert/i;	# query regex matches comment or query
 our $debug_tdelay		= 400;		# maximum artifical wait time (milliseconds)
@@ -193,7 +207,7 @@ sub new
 	my ($pkg, %args) = @_;
 
 
-	my $oops = {
+	my $oops = bless {
 		otype		=> {},	# object id -> H(ash)/A(rray)/S(scalar or ref)
 		loadgroup	=> {},	# object id -> object loadgroup #
 		loadgrouplock	=> {},	# object id -> object id
@@ -205,11 +219,12 @@ sub new
 		new_memory2key 	=> {},	# ref mem location -> [ object id, object key ]
 		memrefs		=> {},	# ref mem location -> ref
 		memcount	=> {},	# ref mem location -> count of active references
+		memsetdebug	=> {},  # where mem->object mappings were made 
 		deleted		=> {},	# object id -> has been deleted
 		unwatched	=> {},	# object id -> must check at save
 		virtual		=> {},	# object id -> is it virtual? yes=V, no=' '
 		arraylen	=> {},	# object id -> integer; array length
-		reftarg		=> {},	# object id -> boolean: '0' || 'T';
+		reftarg		=> {},	# object id -> boolean: '0' || 'T';   Indicates if there are references to elements of this object
 		aliasdest	=> {},	# object id -> hash of objectids that reference id
 		oldvalue	=> {},	# object id & pkey -> original pval
 		oldobject	=> {},  # object id & pkey -> original object id reference
@@ -217,13 +232,18 @@ sub new
 		objtouched	=> {},	# objedt id -> bit - object may need saving
 		demandwritten	=> {},	# object id -> tie control object
 		demandwrite	=> {},	# object id -> write this one via tied.
+		gcgeneration	=> {},  # object id -> garbage collection generation
+		refdebug	=> {},	# object id -> original reference count
+		objverdebug	=> {},	# object id -> object version counter
 		refcount	=> {},	# object id -> reference count
-		refchange	=> {},	# object id -> change in reference count (during commit())
+		refmore		=> {},	# object id -> change in reference count (during commit()) - also serves as a todo list for saving objects
+		refless		=> {},	# object id -> change in reference count (during commit()) - also serves as a todo list for saving objects
 		forcesave	=> {},	# object id -> bit - for object row to be re-written  XXX redesign
 		vcache		=> [],	# objects that implement a CLEAR_CACHE() method
-		do_forcesave	=> 0,	# always update object row when attributes change
+		do_forcesave	=> 0,	# always update object row when attributes change, varies per backend
 		savedone	=> {},	# during commit() - object written?
 		refstowrite	=> [],	# during commit() - list of reference objects to save
+		insave		=> 0,	# are we currently save()ing things?
 		loaded		=> 0,   # number of objects "in memory"
 		tountie		=> {},	# scalars wishing to be untied
 		class		=> {},  # my original class/blessing
@@ -236,21 +256,17 @@ sub new
 		oldalias	=> {},	# object id -> [ object id, pkey ]
 		disassociated	=> {},  # object id & pkey && refs => other disconnected ref
 		virtualize	=> {},	# objects to (un)virtualize
+		gcspillcount	=> 0,	# number of objects spilled to the gc re-do buffer
 		args		=> \%args,  		# creation arguments
 		readonly	=> $args{readonly},	# commit not allowed?
-	};
+	}, $pkg;
 
 	print "# CREATE $$'s OOPS $oops\n" if $debug_oops_instances;
 
-	my ($dbh, $dbms, $prefix) = OOPS->dbiconnect(%args);
+	my $dbo = $oops->{dbo} = OOPS->dboconnect(%args);
+	$dbo->rebless($oops);
 
-	require "OOPS/$dbms.pm";
-
-	$oops->{dbh} 		= $dbh;
-	$oops->{table_prefix}	= $prefix; 
-	$oops->{dbms}		= $dbms;
-	bless $oops, $pkg."::$dbms";
-	print "BLESSED $oops at ".__LINE__."\n" if $debug_blessing;
+	#print "BLESSED $oops at ".__LINE__."\n" if $debug_blessing;
 
 	#
 	# object.otype:
@@ -272,26 +288,32 @@ sub new
 	#
 	#
 
-	# must end in Q to match regex below
-	my $Q = $oops->initial_query_set . <<END;
+	$dbo->learn_queries($dbo->initial_query_set);
+	$dbo->learn_queries(<<END);
 		saveobject: 3
-			INSERT INTO TP_object (id, loadgroup, class, otype, virtual, reftarg, rfe, alen, refs, counter)
-			VALUES (?, ?, ?, ?, ?, ?, '0', ?, ?, 1)
+			INSERT INTO TP_object (id, loadgroup, class, otype, virtual, reftarg, rfe, alen, refs, counter, gcgeneration)
+			VALUES                (?,  ?,         ?,     ?,     ?,       ?,       '0', ?,    ?,    1,       ?)
+		updateobject: 2
+			UPDATE TP_object
+			SET loadgroup = ?, class = ?, otype = ?, virtual = ?, reftarg = ?, alen = ?, refs = ?, gcgeneration = ?, counter = (counter + 1) % 65536
+			WHERE id = ?
 		objectset:
-			SELECT g.* FROM TP_object AS g, TP_object AS og
-			WHERE og.id = ? AND og.loadgroup = g.loadgroup
+			SELECT o.* FROM TP_object AS o, TP_object AS og
+			WHERE og.id = ? AND og.loadgroup = o.loadgroup
+		objectinfo:
+			# this has to be * so that it will work on all versions of the schema
+			# SELECT loadgroup,class,otype,virtual,reftarg,alen,refs,counter,gcgeneration FROM TP_object
+			SELECT * FROM TP_object
+			WHERE id = ?
 		objectgroupload:
-			SELECT o.* FROM TP_attribute AS o, TP_object AS g
-			WHERE g.loadgroup = ? AND g.id = o.id
+			SELECT a.* FROM TP_attribute AS a, TP_object AS g
+			WHERE g.loadgroup = ? AND g.id = a.id
 		objectload:
 			SELECT pkey, pval, ptype FROM TP_attribute
 			WHERE id = ?
 		objectreflist:
 			SELECT pval FROM TP_attribute
 			WHERE id = ? AND ptype = 'R'
-		objectinfo:
-			SELECT loadgroup,class,otype,virtual,reftarg,alen,refs,counter FROM TP_object
-			WHERE id = ?
 		reftargobject: 1
 			SELECT TP_object.id FROM TP_object, TP_attribute
 			WHERE TP_attribute.pkey = ?
@@ -306,10 +328,6 @@ sub new
 		saveattribute: 2 3
 			INSERT INTO TP_attribute 
 			VALUES (?, ?, ?, ?)
-		clearobj: # show
-			DELETE FROM TP_attribute WHERE id = ?;
-			DELETE FROM TP_big WHERE id = ?;
-			DELETE FROM TP_object WHERE id = ?;
 		loadpkey: 2
 			SELECT pval, ptype FROM TP_attribute
 			WHERE id = ? AND pkey = ?
@@ -327,10 +345,6 @@ sub new
 			UPDATE TP_attribute
 			SET pval = ?, ptype = ?
 			WHERE id = ? AND pkey = ?
-		updateobject: 2
-			UPDATE TP_object
-			SET loadgroup = ?, class = ?, otype = ?, virtual = ?, reftarg = ?, alen = ?, refs = ?, counter = (counter + 1) % 65536
-			WHERE id = ?
 		deletebig: 2 # show
 			DELETE FROM TP_big
 			WHERE id = ? AND pkey = ?
@@ -356,38 +370,30 @@ sub new
 			FROM	TP_attribute
 			WHERE	id = ?
 END
-	while ($Q =~ /\G\t\t([a-z]\w*):((?:\s+\d+)*)\s*(#.*)?\n/gc) {
-		my ($qn, $binary_list, $comment) = ($1, $2);
-		while ($Q =~ /\G\t\t\t(.*)\n/gc) {
-			$oops->{queries}{$qn} .= $1."\n";
-		}
-		$oops->{binary_q_list}{$qn} = $binary_list;
-		$oops->{debug_q}{$qn} = $comment;
-	}
 
 	Time::HiRes::sleep(rand($debug_tdelay)/1000) if $debug_tdelay && $debug_dbidelay;
-	$oops->initialize();
+	$oops->{do_forcesave} = $dbo->do_forcesave;
 
 	eval { $oops->{named_objects} = $oops->load_virtual_object(1) };
 	if ($@) {
+		print "Could not load object #1\n" if $debug_setup;
 		my $e = $@;
 		require OOPS::Setup;
-		my $err = $oops->load_failure($e);
-		die $err if $err;
+		$oops->load_failure($e) || die $e;
+		return new($pkg, %args);
 	}
 
 	if ($oops->{arraylen}{1} != $SCHEMA_VERSION) {
 		my $schema_version = $oops->{arraylen}{1};
 		die "schema version = '$schema_version'" unless $schema_version =~ /\A\d+\z/;
 		if ($oops->{args}{auto_upgrade} || $ENV{OOPS_UPGRADE}) {
+			$dbo->disconnect();
 			require "OOPS/Upgrade/To$SCHEMA_VERSION.pm";
 			no strict qw(refs);
-			&{"OOPS::Upgrade::To${SCHEMA_VERSION}::upgrade"}($oops, $schema_version);
-			$oops->disconnect();
-			$dbh = $oops->{dbh} = $oops->dbiconnect();
+			&{"OOPS::Upgrade::To${SCHEMA_VERSION}::upgrade"}($schema_version, %{$oops->{args}});
+			return new($pkg, %args);
 		} else {
-			$oops->disconnect();
-			$oops->byebye();
+			$dbo->disconnect();
 			require "OOPS/OOPS$schema_version.pm"
 				|| die "could not find historical version $schema_version: $@";
 			no strict qw(refs);
@@ -407,51 +413,30 @@ END
 
 sub dbiconnect
 {
-	my ($pkg, %a) = @_;
-	my $args = \%a;
-	if (ref($pkg) && ! %a) {
-		$args = $pkg->{args};
-	}
-	my $database = $args->{dbi_dsn} || $args->{DBI_DSN};
-	my $user = $args->{user} || $args->{username} || $args->{USER} || $args->{USERNAME};
-	my $password = $args->{pass} || $args->{password} || $args->{PASS} || $args->{PASSWORD};
-	my $prefix = $args->{table_prefix} || $args->{TABLE_PREFIX} || $ENV{OOPS_PREFIX} || '';
-	if (! defined($database)) {
-		if (defined($ENV{OOPS_DSN})) {
-			$database = $ENV{OOPS_DSN};
-		} elsif (defined($ENV{DBI_DSN})) {
-			$database = $ENV{DBI_DSN} 
-		} elsif (defined($ENV{OOPS_DRIVER})) {
-			$database = "dbi::$ENV{OOPS_DRIVER}";
-		} elsif (defined($ENV{DBI_DRIVER})) {
-			$database = "dbi::$ENV{DBI_DRIVER}";
-		} else {
-			die "no database specified";
-		}
-	}
-	die "no database specified" unless $database;
-	die "only mysql, PostgreSQL & SQLite supported" 
-		unless $database =~ /^dbi:(mysql|pg|sqlite|sqlite2)\b/i;
-	my $dbms = "\L$1";
-	$user = $user || $ENV{OOPS_USER} || $ENV{DBI_USER};
-	$password = $password || $ENV{OOPS_PASS} || $ENV{DBI_PASS};
-	my $dbh = DBI->connect($database, $user, $password, {
-		Taint => 0,
-		PrintError => 0,
-		RaiseError => 0,
-		AutoCommit => 0,
-		}) or confess "connect to database: $DBI::errstr";
-	$dbh->trace($debug_dbi) if $debug_dbi;
-	return ($dbh, $dbms, $prefix) if wantarray;
-	return $dbh;
+	return OOPS::DBO::dbiconnect(@_);
 }
 
-sub disconnect
+sub dboconnect
 {
-	my ($oops) = @_;
-	return unless $oops->{dbh};
-	$oops->{dbh}->disconnect();
-	delete $oops->{dbh};
+	return OOPS::DBO::dboconnect(@_);
+}
+
+sub errstr
+{
+	my $oops = shift;
+	return $oops->{dbo}->errstr;
+}
+
+sub dbo
+{
+	my $oops = shift;
+	return $oops->{dbo};
+}
+
+sub query
+{
+	my $oops = shift;
+	return $oops->{dbo}->query(@_);
 }
 
 sub initial_setup
@@ -500,8 +485,8 @@ sub load_object
 	#
 	my %newptype;
 	my %new;
-	my ($object, $loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $references, $ocounter);
-	while (($object, $loadgroup, $class, $otype, $virtual, $reftarg, undef, $arraylen, $references, $ocounter) = $objectsetQ->fetchrow_array()) {
+	my ($object, $loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $references, $ocounter, $gcgen);
+	while (($object, $loadgroup, $class, $otype, $virtual, $reftarg, undef, $arraylen, $references, $ocounter, $gcgen) = $objectsetQ->fetchrow_array()) {
 		if (exists $cache->{$object}) {
 			print "skipping $otype $object $loadgroup $class -- already cached\n" if $debug_load_values || $debug_cache;
 			next;
@@ -518,6 +503,8 @@ sub load_object
 		die unless $loadgroup;
 		$atloadgroup = $loadgroup;
 		$oops->{groupset}{$atloadgroup}{$object} = 1;
+		$oops->{objverdebug}{$object} = $ocounter;
+		$oops->{refdebug}{$object} = $references;
 		$refcount->{$object} = $references;
 		print "load *$object loadgroup:$loadgroup class:$class otype:$otype refcount:$references virtual:$virtual reftarg:$reftarg arraylen:$arraylen\n" if $debug_load_values || $debug_arraylen || $debug_refcount;
 		if ($otype eq 'H') {
@@ -527,7 +514,7 @@ sub load_object
 		} elsif ($otype eq 'A') {
 			$new{$object} = $cache->{$object} = [];
 			$#{$cache->{$object}} = $arraylen-1;
-			$oops->{objtouched}{$object} = 'always';
+			$oops->{objtouched}{$object} = 'untied array';
 			print "*$object load_object cache := fresh array: $qval{$cache->{$object}}\n" if $debug_cache;
 			print "in load_object, *$object is always touched 'cause it's an array\n" if $debug_touched;
 		} elsif ($otype eq 'S') {
@@ -540,6 +527,10 @@ sub load_object
 		$oops->{arraylen}{$object} = $arraylen;
 		$oops->{reftarg}{$object} = $reftarg;
 		$oops->{virtual}{$object} = $virtual;
+
+		print "*$object loaded gcgen = $gcgen\n" if $debug_gcgeneration;
+		$oops->{gcgeneration}{$object} = $gcgen;
+
 		$type->{$object} = $otype;
 		$newptype{$object} = {};
 		$oloadgroup->{$object} = $loadgroup;
@@ -559,6 +550,10 @@ sub load_object
 		#
 		print "load loadgroup: $atloadgroup\n" if $debug_load_values;
 		my $objectgrouploadQ = $oops->query('objectgroupload', execute => $atloadgroup);
+		no warnings;
+		local($objectgrouploadQ->{HandleError}) = undef;
+		local($objectgrouploadQ->{RaiseError}) = 0;
+		use warnings;
 		for (;;) {
 			while(($id, $pkey, $pval, $ptype) = $objectgrouploadQ->fetchrow_array) {
 				next unless exists $newptype{$id};  # need something that is set on new objects only
@@ -610,7 +605,7 @@ sub load_object
 							print "TIE \$*$id OOPS::RefBig val='$pval'\n" if $debug_tie;
 							tie ${$cache->{$id}}, 'OOPS::RefBig', $oops, $id, $pval;
 						} elsif ($ptype eq '0') {
-							$oops->{objtouched}{$id} = 'always';
+							$oops->{objtouched}{$id} = 'untied reference';
 							$oops->{oldvalue}{$id}{$nopkey} = $pval;
 							$x = $pval;
 							print "\$*$id = '$pval' -- no tie at all\n" if $debug_refalias && defined($pval);
@@ -618,7 +613,7 @@ sub load_object
 						} else {
 							confess;
 						}
-#					} elsif (0 && exists $cache->{$pkey}
+#					} elsif (exists $cache->{$pkey}
 #						&& ! exists $new{$pkey} 
 #						&& defined $pval 
 #						&& reftype($cache->{$pkey}) eq 'HASH'
@@ -658,7 +653,7 @@ sub load_object
 			}
 			if ($objectgrouploadQ->err) {
 				if ($objectgrouploadQ->errstr() =~ /fetch\(\) without execute\(\)/) {
-					warn "working around DBI bug";
+					warn "working around DBI bug"; # debug
 					$objectgrouploadQ->execute($atloadgroup) || confess $objectgrouploadQ->errstr;
 					$dbi_bug_workaround_count_debug++; 
 					next;
@@ -760,9 +755,8 @@ sub load_virtual_object
 		if $objectid == 0;
 	confess unless $objectid;
 
-	my $objectinfoQ = $oops->query('objectinfo', execute => $objectid);
-	return $objectinfoQ unless ref $objectinfoQ;
-	my ($loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $refs) = $objectinfoQ->fetchrow_array();
+	my $objectinfoQ = $oops->query('objectinfo', execute => $objectid) || die $oops->errstr;
+	my (undef, $loadgroup, $class, $otype, $virtual, $reftarg, $reserved, $arraylen, $refs, undef, $gcgen) = $objectinfoQ->fetchrow_array();
 	die "no object $objectid: ".$objectinfoQ->errstr unless $otype;
 	$objectinfoQ->finish();
 
@@ -781,6 +775,8 @@ sub load_virtual_object
 	$oops->{loadgroup}{$objectid} = $objectid;
 	$oops->{cache}{$objectid} = $obj;
 	$oops->{refcount}{$objectid} = $refs;
+	$oops->{gcgeneration}{$objectid} = $gcgen;
+	print "VH$objectid loaded gcgen = $gcgen\n" if $debug_gcgeneration;
 	$oops->memory($obj, $objectid);
 	$oops->memory($tied, $objectid);
 	print "MEMORY $qval{$obj} := *$objectid' - in load_virtual_object\n" if $debug_memory;
@@ -795,6 +791,7 @@ sub process_deferred_virtualize
 {
 	my ($oops) = @_;
 	for my $obj (values %{$oops->{virtualize}}) {
+		next unless defined $obj; # it's a weak reference
 		my $id = $oops->get_object_id($obj);
 		$oops->virtual_object($id, 1);
 	}
@@ -825,6 +822,8 @@ sub virtual_object
 		$id = $obj;
 	}
 
+	croak unless $oops->{otype}{$id};
+
 	my $old = $oops->{virtual}{$id} eq 'V';
 	print "*$id - virtual_object($newval)\n" if $debug_load_group;
 	if (@_ > 2) {
@@ -839,13 +838,15 @@ sub virtual_object
 					print "in virtual_object($id) setting new group for *$o\n" if $debug_load_group;
 					print "in virtual_object, *$id forcesave\n" if $debug_forcesave;
 					$oops->{loadgroup}{$o} = $o;
-					$oops->{forcesave}{$o} = 1;
+					$oops->{forcesave}{$o} = __LINE__;
 				}
 			}
 		} else {
 			$oops->{virtual}{$id} = '0';
 		}
-		$oops->{forcesave}{$id} = 1;
+		$oops->{forcesave}{$id} = 
+			sprintf("%d/%d/%d", __LINE__, (caller(1))[2], (caller(2))[2]); my $x = # debug
+			__LINE__;
 		print "in virtual_object, forcesave *$id virtual=$newval\n" if $debug_forcesave;
 		print "%$id - virtual: $newval.\n" if $debug_isvirtual;
 	}
@@ -859,16 +860,16 @@ sub lock {
 	my $mem = refaddr($thing);
 	if ((my $r = $oops->{memory2key}{$mem})) {
 		my ($id, $key) = @$r;
-		return $oops->lock_attribute($id, $key);
+		return $oops->{dbo}->lock_attribute($id, $key);
 	}
 	if ((my $id = $oops->{memory}{$mem})) {
 		
-		return $oops->lock_object($id);
+		return $oops->{dbo}->lock_object($id);
 	}
 	if ((my ($tiedaddr, $key) = tied_hash_reference($_[0]))) {
 		my $id = $oops->{memory}{$tiedaddr} || $oops->{new_memory}{$tiedaddr};
 		return 0 unless $id;
-		return $oops->lock_attribute($id, $key);
+		return $oops->{dbo}->lock_attribute($id, $key);
 	}
 	return 0;
 }
@@ -887,11 +888,12 @@ sub transaction
 {
 	shift if ref $_[0] ne 'CODE';
 	my ($code, @args) = @_;
-	my $tries = 0;
+	local($transaction_tries) = 1;
 	my $auto_die;
 	for (;;) {
 		croak "next or redo inside eval" if $auto_die; # protect aginst 'next' et all inside eval
 		$auto_die = 1; 
+		local(@transaction_rollback) = ();
 		if (wantarray) {
 			my @r;
 			eval { @r = (&$code(@args)); };
@@ -901,15 +903,28 @@ sub transaction
 			eval { $r = &$code(@args); };
 			return $r unless $@;
 		};
-		if ($@ =~ /$transfailrx/) {
-			croak "aborting transaction -- persistent deadlock"
-				if $tries++ > $transaction_maxtries;
-			print STDERR "Restarting transaction\n" if $warnings;
+		my $error = $@;
+		for my $r (@transaction_rollback) {
+			&$r($error);
+		}
+		if ($error =~ /($transfailrx)/) {
+			croak "aborting transaction -- persistent deadlock: $1"
+				if $transaction_tries++ > $transaction_maxtries;
 			$auto_die = 0;
+			require Time::HiRes;
+			import Time::HiRes qw(sleep);
+			if ($transaction_failure_sleep) {
+				my $base = $transaction_failure_maxsleep ** (1 / $transaction_maxtries);
+				my $sleeptime = rand($transaction_failure_sleep * $base ** ($transaction_tries-1));
+				printf STDERR "Sleeping %.2f seconds, restarting transaction ($transaction_tries)\n", $sleeptime;
+				sleep($sleeptime);
+			} else {
+				print STDERR "Restarting transaction ($transaction_tries)\n" if $warnings;
+			}
 			redo;
 		}
-		print STDERR "E='$@'\n";  # debug
-		croak $@;
+		print STDERR "E='$error'\n";  # debug
+		croak $error;
 	}
 	croak "last inside eval"; # protect aginst 'next' et all inside eval
 }
@@ -931,8 +946,7 @@ sub getref(\%$)
 sub rollback
 {
 	my $oops = shift;
-	confess unless $oops->{dbh};
-	$oops->{dbh}->rollback();
+	$oops->{dbo}->rollback();
 	$oops->DESTROY();
 }
 
@@ -942,10 +956,28 @@ sub commit
 	die if $oops->{readonly};
 	$oops->save;
 	my $x = int(rand($debug_tdelay)); if ($debug_tdelay && $debug_dbidelay) { for (my $i = 0; $i < $x; $i++) {} }
-	$oops->{dbh}->commit || die $oops->{dbh}->errstr;
+	$oops->{dbo}->commit || die $oops->errstr;
 	print "COMMIT $oops done\n" if $debug_commit;
 	assertions($oops);
 }
+
+
+#
+# There are two parts to saving state: saving the objects and 
+# saving the object attributes.
+# 
+# Rewrite: save all attributes before saving the objects.
+#
+# Object records will be re-written if:
+#	$oops->{refmore}{$id} 
+#	$oops->{refless}{$id} 
+#	$oops->{forcesave}{$id} 
+#
+# Contents will be re-written if:
+#	$oops->{unwatched}{$id} 
+#	$oops->{objtouched}{$id} 
+#	$oops->{demandwrite}{$id} 
+# 
 
 sub save
 {
@@ -957,20 +989,23 @@ sub save
 
 	confess unless $oops->isa('OOPS');
 	my $savedone = $oops->{savedone} = {};
-	my $forcesave = $oops->{forcesave} = {};
+	my $forcesave = $oops->{forcesave};
 
 	my $cache = $oops->{cache};
 	my $refcount = $oops->{refcount};
 	my $oloadgroup = $oops->{loadgroup};
 	my $type = $oops->{otype};
 	my $oclass = $oops->{class};
-	my $refchange = $oops->{refchange};
+	my $refmore = $oops->{refmore};
+	my $refless = $oops->{refless};
 	my $refstowrite = $oops->{refstowrite};
 	my $loadgrouplock = $oops->{loadgrouplock};
 	my $virtual = $oops->{virtual};
 	my $arraylen = $oops->{arraylen};
 	my $reftarg = $oops->{reftarg};
 	my @tied;
+
+	local($oops->{insave}) = 1;
 
 	$oops->process_deferred_virtualize();
 
@@ -980,8 +1015,10 @@ sub save
 	#
 	# HASHes that have been DESTROYed are considered 'touched'
 	#
+	# NEW object are always touched
+	#
 	for my $id (keys %{$oops->{objtouched}}) {
-		print "*$id->write_object (touched)\n" if $debug_commit;
+		print "*$id->write_object (touched: $oops->{objtouched}{$id})\n" if $debug_commit;
 		$oops->write_object($id);
 	}
 
@@ -1025,27 +1062,49 @@ sub save
 	my %done;
 	my $pass;
 
+	#
+	# Look at objects and make adjustments while there
+	# remains %refmore, %refless or @refstowrite.
+	#
 	for(;;) {
-		# more refstowrite may be added while looking at refchange
+		# more refstowrite may be added while looking at refmore
 		while (@$refstowrite) {
 			$oops->write_ref(shift @$refstowrite);
 		}
-		last unless %{$oops->{refchange}};
 
-		$refchange = $oops->{refchange};
-		$oops->{refchange} = {};
-		my (@todo) = keys %$refchange;
+		# Do additions before subtractions so that we don't have
+		# any false deletes.
+		my $refchange;
+		if (%{$oops->{refmore}}) {
+			$refchange = $oops->{refmore};
+			$oops->{refmore} = {};
+		} elsif (%{$oops->{refless}}) {
+			$refchange = $oops->{refless};
+			$oops->{refless} = {};
+		} else {
+			last;
+		}
+
 		print "commit, pass $pass\n" if $debug_commit && $pass++;
-		for my $id (@todo) {
+		for my $id (keys %$refchange) {
 			while (@$refstowrite) {
 				$oops->write_ref(shift @$refstowrite);
 			}
-			$done{$id}++;
 			if ($refchange->{$id}) {
-				if (exists $refcount->{$id}) {
+				#
+				# The reference count for $id needs to be changed.
+				#
+				if (exists $cache->{$id}) {
+					#
+					# Object is loaded.
+					#
 					printf "in commit, *%d refs: old %d + change %s (=%d)\n", $id, $refcount->{$id}, $qplusminus{$refchange->{$id}}, $refcount->{$id}+ $refchange->{$id} if $debug_refcount;
 					my $newobject = ($refcount->{$id} == -1);
 					$refcount->{$id} += $refchange->{$id};
+					if ($oops->{refless}{$id} and $refcount->{$id} + $oops->{refless}{$id} > 0) {
+						$refcount->{$id} += $oops->{refless}{$id};
+						delete $oops->{refless}{$id};
+					}
 					if ($refcount->{$id} > 0) {
 						my $otype = $type->{$id} || confess;
 						my $loadgroup;
@@ -1067,44 +1126,57 @@ sub save
 							$loadgroup ||= $firstid;
 						}
 						$oloadgroup->{$id} = $loadgroup;
-						print "*$id updated1. loadgroup=$loadgroup, class=$qref{$cache->{$id}} otype=$otype, virtual=$virtual->{$id} reftarg=$reftarg->{$id} refcount=$refcount->{$id} arraylen=$arraylen->{$id}\n" if $debug_load_group || $debug_isvirtual || $debug_write_object || $debug_arraylen || $debug_refcount;
-						$updateobjectQ->execute($loadgroup, ref($cache->{$id}), $otype, $virtual->{$id} || '0', $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $id)
-							|| confess $updateobjectQ->errstr;
-#print "updated $id $refcount->{$id}\n";
+						die if $oops->{deleted}{$id};  # assertion
+						print "*$id updated1 (later). loadgroup=$loadgroup, class=$qref{$cache->{$id}} otype=$otype, virtual=$virtual->{$id} reftarg=$reftarg->{$id} refcount=$refcount->{$id} arraylen=$arraylen->{$id} gcgen=$oops->{gcgeneration}{$id}\n" if $debug_load_group || $debug_isvirtual || $debug_write_object || $debug_arraylen || $debug_refcount;
+						$forcesave->{$id} = __LINE__;
 						$oclass->{$id} = ref($cache->{$id});
 						$classdone{$id} = __LINE__;
 					} elsif ($refcount->{$id} == 0) {
-						print "*$id - no refereces, deleting\n" if $debug_write_object || $debug_refcount;
+						print "*$id - no refereces, will delete\n" if $debug_write_object || $debug_refcount;
 #print "refcount *$id = 0, deleting\n";
 						$oops->delete_object($id);
+						$done{$id} = __LINE__;
 					} else {
 						confess "refcount: $refcount->{$id}";
 					}
 				} else {
+					#
+					# Object is not loaded, fetch the refcount.
+					#
+					# TODO/OPTIMIZATION: this may result in extra queries.  Cache the refcounts and
+					# delay the writes the same way as is done for cached objects.
+					#
 					$objectinfoQ->execute($id) || confess;
-					my ($loadgroup, $class, $otype, $ovirtual, $oreftarg, $oarraylen, $refs) = $objectinfoQ->fetchrow_array;
+					my (undef, $loadgroup, $class, $otype, $ovirtual, $oreftarg, undef, $oarraylen, $refs, $counter, $gcgen) = $objectinfoQ->fetchrow_array;
 					$objectinfoQ->finish();
 					confess unless $class;
 					printf "in commit, uncached *%d refs: old %d +change %d = (=%d)\n", $id, $refs, $refchange->{$id}, $refs+ $refchange->{$id} if $debug_refcount || $debug_write_object;
 					$refcount->{$id} = $refs + $refchange->{$id};
+					if ($oops->{refless}{$id} and $refcount->{$id} + $oops->{refless}{$id} > 0) {
+						$refcount->{$id} += $oops->{refless}{$id};
+						delete $oops->{refless}{$id};
+					}
 					confess if exists $cache->{$id};
 					if ($refcount->{$id} > 0) {
-						$updateobjectQ->execute($loadgroup, $class, $otype, $ovirtual || '0', $oreftarg, $oarraylen, $refcount->{$id}, $id);
-						print "*$id updated2. loadgroup=$loadgroup, type=$class, otype=$otype, refcount=$refcount->{$id} virtual=$ovirtual reftarg=$oreftarg arraylen=$oarraylen\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount;
+						die if $oops->{deleted}{$id}; # assertion
+						$updateobjectQ->execute($loadgroup, $class, $otype, $ovirtual || '0', $oreftarg, $oarraylen, $refcount->{$id}, $gcgen, $id);
+						print "*$id updated2. loadgroup=$loadgroup, type=$class, otype=$otype, refcount=$refcount->{$id} virtual=$ovirtual reftarg=$oreftarg arraylen=$oarraylen, gcgen=$gcgen\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount || $debug_gcgeneration;
+						$done{$id} = __LINE__;
 					} elsif ($refcount->{$id} == 0) {
 						$oops->delete_object($id);
+						$done{$id} = __LINE__;
 					} else {
-						confess;
+						confess "refcount: $refcount->{$id}";
 					}
 				}
 			} else {
 				if ($refcount->{$id} > 0) {
 					printf "*$id no change in refcount, marking for forced saving\n" if $debug_refcount || $debug_write_object;
-					$forcesave->{$id} = 2
-						if $forcesave->{$id};
+					$forcesave->{$id} = __LINE__;
 				} elsif ($refcount->{$id} == 0) {
 					printf "in commit, deleting unchanged unreferenced $oops->{otype}{$id}*$id (=0)\n" if $debug_refcount || $debug_write_object;
 					$oops->delete_object($id);
+					$done{$id} = __LINE__;
 				} else {
 					confess "negative refcount: *$id: $refcount->{$id}";
 				}
@@ -1123,7 +1195,7 @@ sub save
 		next if $classdone{$id};
 		printf "classchange %d: %s -> %s.\n", $id, $oclass->{$id}, ref($cache->{$id}) if $debug_commit;
 		$oclass->{$id} = ref($cache->{$id});
-		$forcesave->{$id} = 2
+		$forcesave->{$id} = __LINE__
 			unless $forcesave->{$id};
 	}
 
@@ -1137,24 +1209,32 @@ sub save
 	#
 	my $die;
 	for my $id (keys %$forcesave) {
-		next if $done{$id} && $forcesave->{$id} == 1;
-		my $type = $type->{$id} || confess;
+		next if $done{$id};
+		my $otype = $type->{$id} || confess 
+			"at line $forcesave->{$id} (from $oops->{memsetdebug}{$id})... " .  # debug
+			"no type for object $id";
 		my $loadgroup = $oloadgroup->{$id} || $id;
-		print "*$id updated3. loadgroup=$loadgroup, type=".ref($cache->{$id})." otype=$type, refcount=$refcount->{$id} virtual=$virtual->{$id} reftarg=$reftarg arraylen=$arraylen->{$id}\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount;
-		$updateobjectQ->execute($loadgroup, ref($cache->{$id}), $type, $virtual->{$id}, $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $id)
-			|| confess $updateobjectQ->errstr; 
+		die if $oops->{deleted}{$id}; # assertion
+		print "*$id updated3. loadgroup=$loadgroup, type=".ref($cache->{$id})." otype=$otype, refcount=$refcount->{$id} virtual=$virtual->{$id} reftarg=$reftarg arraylen=$arraylen->{$id} gcgen=$oops->{gcgeneration}{$id}\n" if $debug_load_group || $debug_write_object || $debug_arraylen || $debug_refcount || $debug_gcgeneration;
+		$updateobjectQ->execute($loadgroup, ref($cache->{$id}), $otype, $virtual->{$id}, $reftarg->{$id}, $arraylen->{$id}, $refcount->{$id}, $oops->{gcgeneration}{$id}, $id)
+			|| confess $updateobjectQ->errstr;
 		$oclass->{$id} = ref($cache->{$id});
 	}
 
 	for my $tied (@tied) {
 		$tied->POST_SAVE;
 	}
+	$oops->{forcesave} = {};
 }
 
+#
+# This saves the contents of an object.  The object
+# itself is updated in save().
+#
 sub write_object
 {
-	my ($oops, $id) = @_;
-	$id = $oops->get_object_id($id) 
+	my ($oops, $id, $sponsoring_id) = @_;
+	$id = $oops->get_object_id($id, $sponsoring_id) 
 		if ref $id; 
 
 	return if $oops->{savedone}{$id}++; 
@@ -1198,10 +1278,10 @@ sub write_object
 					print "\$*$id is an existing object *$m\n" if $debug_write_ref;
 				} else {
 					print "lookup MEMORY($qval{$$obj}) = ? in write_object - ref\n" if $debug_memory;
-					$m = $oops->get_object_id($$obj);
+					$m = $oops->get_object_id($$obj, $id);
 					print "\$*$id is a new object *$m: $qval{$$obj}\n" if $debug_write_ref;
 				}
-				$oops->write_object($m);
+				$oops->write_object($m, $id);
 			} else {
 				print "\$*$id is a ref to a scalar $qval{$$obj}\n" if $debug_write_ref;
 			}
@@ -1261,7 +1341,7 @@ sub write_hash
 				use warnings;
 				print "\%$id/$pkey ...unchanged\n" if $debug_write_hash;
 				print "lookup MEMORY($qval{$obj->{$pkey}}) in write_hash\n" if $debug_memory;
-				$oops->write_object($memory->{refaddr($obj->{$pkey})})
+				$oops->write_object($memory->{refaddr($obj->{$pkey})}, $id)
 					if ref $obj->{$pkey};
 			} else {
 				use warnings;
@@ -1280,10 +1360,10 @@ sub write_hash
 		} elsif (exists $oldobject->{$id} && exists $oldobject->{$id}{$pkey}) {
 			# this used to be an object
 			print "\%$id/$pkey this used to be an object...\n" if $debug_write_hash;
-			if (ref $obj->{$pkey} && $oldobject->{$id}{$pkey} == $oops->get_object_id($obj->{$pkey})) {
+			if (ref $obj->{$pkey} && $oldobject->{$id}{$pkey} == $oops->get_object_id($obj->{$pkey}, $id)) {
 				# no change
 				print "\%$id/$pkey same one\n" if $debug_write_hash;
-				$oops->write_object($oldobject->{$id}{$pkey});
+				$oops->write_object($oldobject->{$id}{$pkey}, $id);
 			} else {
 				print "\%$id/$pkey changed to $qval{$obj->{$pkey}}\n" if $debug_write_hash;
 				$oops->update_attribute($id, $pkey, $obj->{$pkey});
@@ -1408,7 +1488,7 @@ sub write_array
 				use warnings;
 				print "$sym$id/$index ...reference - no change\n" if $debug_write_array;
 				print "lookup MEMORY($qval{$obj->[$index]}) in write_object - array\n" if $debug_memory && ref($obj->[$index]);
-				$oops->write_object($memory->{refaddr($obj->[$index])})
+				$oops->write_object($memory->{refaddr($obj->[$index])}, $id)
 					if ref $obj->[$index];
 				next;
 			} else {
@@ -1419,9 +1499,9 @@ sub write_array
 			}
 		} elsif (exists($oldobject->{$id}) && exists($oldobject->{$id}{$index})) {
 			print "\@$id/$index this used to be an object: *$oldobject->{$id}{$index}\n" if $debug_write_array;
-			if (ref $obj->[$index] && $oldobject->{$id}{$index} == $oops->get_object_id($obj->[$index])) {
+			if (ref $obj->[$index] && $oldobject->{$id}{$index} == $oops->get_object_id($obj->[$index], $id)) {
 				print "\@$id/$index same one - no change\n" if $debug_write_array;
-				$oops->write_object($oldobject->{$id}{$index});
+				$oops->write_object($oldobject->{$id}{$index}, $id);
 				next;
 			} else {
 				print "\@$id/$index changed\n" if $debug_write_array;
@@ -1449,7 +1529,7 @@ sub write_array
 	}
 	if (! defined($oops->{arraylen}{$id}) || $oops->{arraylen}{$id} != @$obj) {
 		$oops->{arraylen}{$id} = @$obj;
-		$oops->{forcesave}{$id} = 1;
+		$oops->{forcesave}{$id} = __LINE__;
 		print "in write_array, arraylen(\@*$id) = $oops->{arraylen}{$id}, forcesave\n" if $debug_arraylen || $debug_forcesave;
 	} else {
 		print "in write_array, leaving arraylen for \@*$id at $oops->{arraylen}{$id}\n" if $debug_arraylen;
@@ -1627,7 +1707,7 @@ sub write_ref
 	if ($targetid ne $nopkey && ! $oops->{reftarg}{$targetid}) {
 		# this is presently irreversable 
 		$oops->{reftarg}{$targetid} = 'T';
-		$oops->{forcesave}{$targetid} = 1;
+		$oops->{forcesave}{$targetid} = __LINE__;
 		print "force save of *$targetid as its referended by *$id\n" if $debug_forcesave;
 		print "*$targetid is now reference target (from $id)\n" if $debug_reftarget;
 	}
@@ -1701,10 +1781,10 @@ sub write_ref
 	# With references to a common scalar, we must do the same.
 	#
 	if ($targetid ne $nopkey && reftype($oops->{cache}{$targetid}) ne 'HASH') {
-		if ($oops->{loadgroup}{$targetid} eq $oops->{loadgroup}{$id} && ! exists $oops->{refchange}{$targetid}) {
+		if ($oops->{loadgroup}{$targetid} eq $oops->{loadgroup}{$id} && ! exists $oops->{refmore}{$targetid} && ! exists $oops->{refless}{$targetid}) {
 			# great
 		} else {
-			$oops->{forcesave}{$id} = 1;
+			$oops->{forcesave}{$id} = __LINE__;
 			$oops->{loadgrouplock}{$id} = $targetid;
 			print "force \$*$id group to be loged to *$targetid\n" if $debug_load_group || $debug_forcesave;
 		}
@@ -1734,7 +1814,7 @@ sub update_attribute
 		$newover = 1;
 		$ptype = 'B';
 	} elsif (ref($_[0])) {
-		$atval = $oops->get_object_id($_[0]);
+		$atval = $oops->get_object_id($_[0], $id);
 		$change_refs{$atval} += 1;
 		print "*$id/$pkey update_attribute1, add CURRENT ref to *$atval (+1)\n" if $debug_refcount;
 		$ptype = 'R';
@@ -1743,7 +1823,7 @@ sub update_attribute
 	}
 	if (ref($_[2])) {
 		# old value was a reference
-		my $oldid = $oops->get_object_id($_[2]);
+		my $oldid = $oops->get_object_id($_[2], $id);
 		$change_refs{$oldid} -= 1;
 		print "OLDOBJECT *$id/$pkey update_attribute2, oldobject = undef (was $oops->{oldobject}{$id}{$pkey})\n" if $debug_oldobject;
 		delete $oops->{oldobject}{$id}{$pkey};
@@ -1785,12 +1865,12 @@ sub update_attribute
 	} else {
 		$oops->{oldvalue}{$id}{$pkey} = $atval;
 	}
-	$oops->{forcesave}{$id} = 1
+	$oops->{forcesave}{$id} = __LINE__
 		if $oops->{do_forcesave};
 	for my $i (keys %change_refs) {
 		print "*$id/$pkey update_attribute refchange summary for *$i: $qplusminus{$change_refs{$i}}\n" if $debug_refcount;
 		next unless $change_refs{$i};
-		$oops->{refchange}{$i} += $change_refs{$i}
+		$oops->refchange($id, $i, $change_refs{$i});
 	}
 	assertions($oops);
 }
@@ -1804,10 +1884,10 @@ sub prepare_insert_attribute
 	my $atval;
 	my $ptype = '0';
 	if (ref($_[0])) {
-		$atval = $oops->get_object_id($_[0]);
+		$atval = $oops->get_object_id($_[0], $id);
 		print "*$id/$pkey is a reference to *$atval (preparing to save)\n" if $debug_save_attr_arraylen || $debug_write_ref;
 		$ptype = 'R';
-		$oops->{refchange}{$atval} += 1;
+		$oops->refchange($id,$atval,1);
 		$oops->{oldobject}{$id}{$pkey} = $atval;
 		print "OLDOBJECT *$id/$pkey prepare_insert_attribute = *$atval\n" if $debug_oldobject;
 		print "in prepare_insert_attribute, ref to *$atval from *$id/$pkey is new (+1)\n" if $debug_refcount;
@@ -1841,7 +1921,7 @@ sub insert_attribute
 	print "$sym$id/$pkey insert_attribute $qval{$atval} (ptype $ptype)\n" if $debug_writes;
 	$atval = '' if defined($atval) && $atval eq '';   # why does this line help?!?
 	my $saveattributeQ = $oops->query('saveattribute', execute => [ $id, $pkey, $atval, $ptype ]);
-	$oops->{forcesave}{$id} = 1
+	$oops->{forcesave}{$id} = __LINE__
 		if $oops->{do_forcesave};
 	no warnings;
 	print "*$id/$qval{$pkey} - '$atval'/$ptype inserted\n" if $debug_save_attributes;
@@ -1861,13 +1941,13 @@ sub delete_attribute
 	$pkey = '0' if $pkey eq '0';  # make sure it's a string
 	my $deleteattributeQ = $oops->query('deleteattribute', execute => [ $id, $pkey ]);
 	if (ref($oldvalue)) {
-		my $oldid = $oops->get_object_id($oldvalue);
-		$oops->{refchange}{$oldid} -= 1;
+		my $oldid = $oops->get_object_id($oldvalue, $id);
+		$oops->refchange($id,$oldid,-1);
 		print "OLDOBJECT *$id/$pkey delete_attribute, = undef (was $oops->{oldobject}{$id}{$pkey})\n" if $debug_oldobject;
 		delete $oops->{oldobject}{$id}{$pkey};
 		print "in delete_attribute, ref to *$oldid from *$id/$pkey is invalid (-1)\n" if $debug_refcount;
 	} elsif (exists $oops->{oldobject}{$id} && exists $oops->{oldobject}{$id}{$pkey}) {
-		$oops->{refchange}{$oops->{oldobject}{$id}{$pkey}} -= 1;
+		$oops->refchange($id, $oops->{oldobject}{$id}{$pkey}, -1);
 		print "in delete_attribute, ref to *$oops->{oldobject}{$id}{$pkey} from *$id/$pkey is dropped (-1)\n" if $debug_refcount;
 		print "OLDOBJECT *$id/$pkey delete_attribute2, = undef (was $oops->{oldobject}{$id}{$pkey})\n" if $debug_oldobject;
 		delete $oops->{oldobject}{$id}{$pkey};
@@ -1882,14 +1962,14 @@ sub delete_attribute
 	print "*$id/$pkey delete_attribute3, oldobject *$id/$pkey = undef (was $oops->{oldobject}{$id}{$pkey})\n" if $debug_oldobject && exists $oops->{oldobject}{$id} && exists $oops->{oldobject}{$id}{$pkey};
 	delete $oops->{oldobject}{$id}{$pkey}
 		if exists $oops->{oldobject}{$id} && exists $oops->{oldobject}{$id}{$pkey};
-	$oops->{forcesave}{$id} = 1
+	$oops->{forcesave}{$id} = __LINE__
 		if $oops->{do_forcesave};
 	assertions($oops);
 }
 
 sub get_object_id
 {
-	my ($oops, $obj) = @_;
+	my ($oops, $obj, $sponsoring_id) = @_;
 	confess unless ref $oops;
 	confess unless blessed $oops;
 	confess unless $oops->isa('OOPS');
@@ -1901,42 +1981,101 @@ sub get_object_id
 	
 	print Carp::longmess("DEBUG: get_object_id($obj) called ") if $debug_getobid_context;
 
-	my $id = $oops->allocate_id();
+	my $gcgen = $sponsoring_id 
+		? $oops->{gcgeneration}{$sponsoring_id}
+		: 0;
+
+	my $id = $oops->{dbo}->allocate_id();
 
 	#
-	# XXX this ends up needing a double-save.  If we guess correctly
-	# then we could save the extra save much of the time
+	# We save the object so that we don't have to worry about INSERT vs UPDATE
+	# in the rest of the code.   Perhaps we could save the UPDATE by putting
+	# in better values now.
 	#
 	my $saveobjectQ = $oops->query('saveobject');
-	$saveobjectQ->execute($id, $id, "will be".ref($obj), '?', '?', '?', 0, -9999) || confess $saveobjectQ->errstr;
+	$saveobjectQ->execute($id, $id, "will be".ref($obj), '?', '?', '?', 0, -9999, $gcgen) || confess $saveobjectQ->errstr;
 
-	$id = $oops->post_new_object($id);
+	$id = $oops->{dbo}->post_new_object($id);
 
-	# $mem = refaddr(\$obj) if $bt eq 'SCALAR';
 	$oops->memory($obj, $id);
 	print "MEMORY $mem := $id in get_object_id\n" if $debug_memory;
 	$oops->{cache}{$id} = $obj;
 	print "*$id get_object_id cache := $qval{$obj}\n" if $debug_cache;
 	$oops->{class}{$id} = ref $obj;
-	$oops->{refchange}{$id} = 1;
-	$oops->{refcount}{$id} = -1;
 	$oops->{virtual}{$id} = '0';
 	$oops->{arraylen}{$id} = 0;
 	$oops->{reftarg}{$id} = '0';
 	$oops->{loadgroup}{$id} = $id;
 	$oops->{groupset}{$id}{$id} = 1;
+	$oops->{gcgeneration}{$id} = $gcgen;
+	printf "NEW *%d, gcgen = %d (from %s)\n", $id, $gcgen, ($sponsoring_id ? $sponsoring_id : "none") if $debug_gcgeneration;
+
+	# 
+	# Together these will force a save.  We don't use forcesave because 
+	# forcesave is cleared at the beginning of save().
+	#
+	$oops->{refcount}{$id} = -1;
+	$oops->{refmore}{$id} = 1;
+
 	print "in get_object_id, *$id is new: count=-1, change=+1 (=0)\n" if $debug_refcount;
-	print "$typesymbol{$bt}$id created as new object: $obj\n" if $debug_writes;
+	print "$typesymbol{$bt}$id created as new object: $obj\n" if $debug_writes || $debug_write_object;
 	$oops->{otype}{$id} = $perltype2otype{$bt} || confess "bt='$bt',obj=$obj";
 	my $x = $obj->isa('OOPS::Aware')
 		unless $typesymbol{ref($obj)};
 	$obj->object_id_assigned($id)
 		if $x;
 #print "get_ob_id -> write $id\n";
-	$oops->write_object($id);
+
+	if ($oops->{insave}) {
+		$oops->write_object($id, $sponsoring_id);
+	} else {
+		$oops->{objtouched}{$id} = 'new object';
+	}
+
 	$oops->{loaded}++;
 	assertions($oops);
 	return $id;
+}
+
+sub refchange
+{
+	my ($oops, $from, $to, $change) = @_;
+	confess unless $to; # debug
+	confess unless defined $change; # debug
+	if ($change >= 0) {
+		$oops->{refmore}{$to} += $change;
+	} else {
+		$oops->{refless}{$to} += $change;
+	}
+	confess unless $from;
+	return if $change <= 0;
+	my $gc = $oops->{gcgeneration};
+	if (! $gc->{$to}) {
+		#
+		# New object, don't worry about it.
+		#
+		$gc->{$to} = $gc->{$from};
+
+		my $fg = $gc->{$from} ? $gc->{$from} : "none";  # debug
+		print "*$to new gcgen $fg from $from\n" if $debug_gcgeneration;
+	} elsif ($gc->{$from} && $gc->{$from} > $gc->{$to}) {
+		# 
+		# We're in the middle of a GC pass.  We're adding
+		# a link from something that has already been swept
+		# to something that has not been swept.
+		#
+		# Add it to the GC special-handling table.
+		#
+		print "GC: special handling from $from($gc->{$from}) -> $to($gc->{$to})... adding $to to special table\n" if $debug_gcgeneration;
+
+		my $checkQ = $oops->query('loadpkey', execute => [ $gc_overflow_id, $to ]) || confess $oops->errstr;
+		unless(my ($junk1, $junk2) = $checkQ->fetchrow_array()) {
+			$checkQ->finish();
+			my $setQ = $oops->query('saveattribute');
+			$setQ->execute(4, $to, '', '0') || confess $setQ->errstr;
+			$oops->{gcspillcount}++;
+		}
+	}
 }
 
 sub delete_object
@@ -1951,13 +2090,17 @@ sub delete_object
 	assertions($oops);
 }
 
+#
+# Object may or may not be loaded.
+# Object row is not cleared.
+#
 sub predelete_object
 {
 	my ($oops, $id) = @_;
 	print Carp::longmess("DEBUG: predelete_object(@_) called") if 0; # debug
 	unless (defined $oops->{reftarg}{$id}) {
 		my $objectinfoQ = $oops->query('objectinfo', execute => $id);
-		my ($loadgroup, $class, $otype, $virtual, $reftarg, $arraylen, $refs) = $objectinfoQ->fetchrow_array();
+		my (undef, $loadgroup, $class, $otype, $virtual, $reftarg, undef, $arraylen, $refs, $cntr, $gcgen) = $objectinfoQ->fetchrow_array();
 		confess unless $otype;
 		$objectinfoQ->finish();
 		if ($oops->{reftarg}{$id} = $reftarg) {
@@ -2004,11 +2147,9 @@ sub predelete_object
 	my $objectreflistQ = $oops->query('objectreflist', execute => $id);
 	my $objid;
 	while (($objid) = $objectreflistQ->fetchrow_array) {
-		$oops->{refchange}{$objid} -= 1;
+		$oops->refchange($id, $objid, -1);
 		print "in predelete_object, $oops->{otype}{$id}*$id being deleted, no longer references $oops->{otype}{$objid}*$objid (-1)\n" if $debug_refcount;
 	}
-	$oops->{forcesave}{$id} = 1
-		if $oops->{do_forcesave};
 	assertions($oops);
 }
 
@@ -2042,64 +2183,6 @@ sub update_big
 	print STDERR "BIGUPDATE $id, '$pkey'\n" if $debug_bigstuff;
 	my $updatebigQ = $oops->query('updatebig');
 	$updatebigQ->execute($_[0], $id, $pkey) || confess $updatebigQ->errstr;
-}
-
-sub query_debug
-{ #debug
-	my ($oops, $dprefix, $q, %debug_args) = @_;
-
-	my $debug_rx_target;
-	if ($debug_q_regex_target eq 'data') {
-		require Data::Dumper; # debug;
-		$debug_rx_target = Data::Dumper::Dumper(%debug_args);
-	} elsif ($debug_q_regex_target eq 'query') {
-		$debug_rx_target = $oops->{queries}{$q};
-	} elsif ($debug_q_regex_target eq 'comment') {
-		$debug_rx_target = $oops->{debug_q}{$q};
-	} # debug
-
-	my $debug_match = $debug_rx_target =~ /$debug_q_regex/;
-
-	print STDERR "Q$dprefix: $q\n" if ($debug_queries & 2) 
-		&& (($debug_queries & 1) || $debug_match);
-	print STDERR "Q$dprefix: $oops->{queries}{$q}" if ($debug_queries & 4) 
-		&& (($debug_queries & 1) || $debug_match);
-
-	my @debug_args = exists($debug_args{execute})
-		? (defined($debug_args{execute})
-			? (ref($debug_args{execute})
-				? @{$debug_args{execute}}
-				: $debug_args{execute})
-			: ()) # debug
-		: %debug_args;
-
-	print STDERR "A$dprefix: ".join(',', $q, @debug_args)."\n" if ($debug_queries & 8) 
-		&& (($OOPS::debug_queries & 1) || $debug_match);
-} #debug
-
-sub query
-{
-	my ($oops, $q, %args) = @_;
-
-	my $query;
-	confess unless $query = $oops->{queries}{$q};
-	$query =~ s/TP_/$oops->{table_prefix}/g;
-
-	$oops->query_debug('', $q, %args);
-
-	my $dbh = $args{dbh} || $oops->{dbh};
-	my $sth = $dbh->prepare_cached($query, undef, 3) || confess "prepare $query: ".$dbh->errstr;
-
-	if (exists $args{execute}) {
-		my @a = defined($args{execute})
-			? (ref($args{execute})
-				? @{$args{execute}}
-				: $args{execute})
-			: ();
-		$sth->execute(@a) || confess("could not execute '$query' with '@a':".$sth->errstr);
-	}
-	assertions($oops);
-	return $sth;
 }
 
 sub workaround27555
@@ -2136,6 +2219,7 @@ sub setmem
 		$oops->{$mem}{$a} = $_[1];
 		$oops->{memrefs}{$a} = \$_[0]
 			unless $_[1] == 1 || $a == refaddr($oops);
+		$oops->{memsetdebug}{$_[1]} = (caller(2))[2];
 	} else {
 		print "set \U$mem\E $qval{$_[0]} := undef at $caller{2}\n" if $debug_memory2;
 		$oops->{memcount}{$a}--
@@ -2188,7 +2272,7 @@ sub DESTROY
 	local($main::SIG{'__DIE__'}) = \&die_from_destroy;
 	print "OOPS::DESTROY called\n" if $debug_free_tied;
 	my $oops = shift;
-	print "# DESTROY $$'s OOPS $oops\n" if $debug_oops_instances && $oops->{dbh};
+	print "# DESTROY $$'s OOPS $oops\n" if $debug_oops_instances && $oops->{dbo}->dbh;
 #print STDERR "self = $oops\n";
 	my $cache = $oops->{cache} || {};
 	for my $id (keys %$cache) {
@@ -2211,8 +2295,9 @@ sub DESTROY
 		print "Calling *$id->destroy $qval{$tied}\n" if $debug_free_tied;
 		$tied->destroy;
 	}
-	$oops->disconnect();
-	$oops->byebye;
+	if ($oops->{dbo}) {
+		$oops->{dbo}->disconnect();
+	}
 	%$oops = ();
 	$oopses--;
 	assertions($oops);
@@ -2271,6 +2356,29 @@ sub tied_hash_reference
 			while lc($magic->TYPE) ne 'p';
 		return (${$magic->OBJ->RV}, $magic->PTR->as_string);
 	};
+}
+
+#
+# Get a slice w/o reading the entire thing.
+#
+sub walk_hash(\%@)
+{
+	my $obj = shift;
+	my ($stride, $key) = @_;
+	die unless $stride >= 1;
+	my $tied = tied(%$obj);
+	if ($tied && $tied->can('WALK_HASH')) {
+		return $tied->WALK_HASH(@_);
+	}
+	my @ret;
+	for my $k (sort keys %$obj) {
+		if (@_ > 1 && defined($key)) {
+			next unless $k gt $key;
+		}
+		push(@ret, $k);
+		last if @ret >= $stride;
+	}
+	return @ret;
 }
 
 #	-	-	-	-	-	-	-	-	-	-	- 
@@ -2715,7 +2823,7 @@ sub tied_hash_reference
 		confess if tied %{$oops->{cache}{$id}};
 		untie(%{$oops->{cache}{$id}});   # Yes, this is required.  
 		%{$oops->{cache}{$id}} = %$values;
-		$oops->{objtouched}{$id} = 1;
+		$oops->{objtouched}{$id} = 'destroyed';
 		delete $oops->{demandwrite}{$id};
 		print "in NormalHash::DESTROY, *$id is touched -- \$oops is still valid\n" if $debug_touched;
 		print "DESTROY NormalHash \%*$id $self\n" if $debug_free_tied || $debug_normalhash;
@@ -3039,7 +3147,7 @@ sub tied_hash_reference
 		$vars->{ineach} = 1;
 		keys %$values;
 		print "\%$id hFIRSTKEY\n" if $debug_normalhash;
-		$oops->assertions;
+		$oops->assertions if $oops;
 		return $self->NEXTKEY();
 	}
 
@@ -3056,7 +3164,7 @@ sub tied_hash_reference
 			delete $vars->{ineach};
 			print "\%$id hNEXTKEY = undef\n" if $debug_normalhash;
 		}
-		$oops->assertions;
+		$oops->assertions if $oops;
 		return $pkey;
 	}
 
@@ -3072,7 +3180,7 @@ sub tied_hash_reference
 {
 	package OOPS::DemandHash;
 
-	use Carp qw(confess longmess);
+	use Carp qw(confess longmess croak);
 	use Scalar::Util qw(weaken refaddr);
 
 	#
@@ -3100,6 +3208,8 @@ sub tied_hash_reference
 		if ($vars->{alldelete}) {
 			print "%$id alldelete\n" if $debug_virtual_save;
 			$oops->predelete_object($id);  # doesn't clear object row.
+			$oops->{forcesave}{$id} = __LINE__
+				if $oops->{do_forcesave};
 			$oops->query('postdeleteV', execute => $id);
 			$self->LOAD_SELF_REF() if $oops->{reftarg}{$id};
 		} elsif (%$dcache || %$wcache) {
@@ -3118,17 +3228,17 @@ sub tied_hash_reference
 					print "%$id/'$pkey' - checking old pval in virtual SAVE_SELF\n" if $debug_virtual_delete || $debug_virtual_save;
 					my $loadpkeyQ = $oops->query('loadpkey', execute => [ $id, $pkey ]);
 					if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
+						$loadpkeyQ->finish();
 						$ovcache->{$pkey} = [ $pval, $ptype ];
 					} else {
 						# no old value
 					}
-					$loadpkeyQ->finish();
 				}
 				if (! $ptype) {
 					# nothing
 				} elsif ($ptype eq 'R') {
 					 print "%$id/'$pkey' - old value was a reference (*$pval)\n" if $debug_virtual_delete || $debug_virtual_save || $debug_refcount; 
-					$oops->{refchange}{$pval} -= 1;
+					$oops->refchange($id, $pval, -1);
 					print "in demandhash save-self, V%$id reference to $oops->{otype}{$pval}*$pval gone (-1)\n" if $debug_refcount;
 				} elsif ($ptype eq 'B') {
 					print "%$id/'$pkey' - old value was big\n" if $debug_virtual_delete || $debug_virtual_save; 
@@ -3287,17 +3397,16 @@ sub tied_hash_reference
 		my ($pval, $ptype);
 		my $loadpkeyQ = $oops->query('loadpkey', execute => [ $id, $pkey ]);
 		if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
+			$loadpkeyQ->finish();
 			if ($ptype) {
 				$ovcache->{$pkey} = [ $pval, $ptype ];
 			} else {
 				$rcache->{$pkey} = $pval;
 			}
-			$loadpkeyQ->finish();
 			print "%*$id/'$pkey' vEXISTS: 0 - found in db\n" if $debug_virtual_hash;
 			return 1;
 		} else {
 			$necache->{$pkey} = 1;
-			$loadpkeyQ->finish();
 			print "%*$id/'$pkey' vEXISTS: 0 - not found in db\n" if $debug_virtual_hash;
 			return 0;
 		}
@@ -3350,6 +3459,7 @@ sub tied_hash_reference
 		}
 		no warnings qw(uninitialized);
 		print "%*$id/$pkey vORIGINAL_VALUE = $qval{$pval}\n" if $debug_virtual_ovals;
+
 
 		return $pval;
 	}
@@ -3622,6 +3732,57 @@ sub tied_hash_reference
 		}
 	}
 
+	# to retrieve just some of the keys of a hash
+	sub WALK_HASH
+	{
+		my ($self, $stride, $key) = @_;
+		my ($oops, $id, $rcache, $wcache, $necache, $ovcache, $dcache, $vars) = @$self;
+
+		my $gs;
+		if (@_ > 2 && defined($key)) {
+			$gs = $oops->{dbo}->adhoc_query(<<END, execute => [ $id, $key ]);
+				SELECT	pkey, pval, ptype 
+				FROM	TP_attribute
+				WHERE	id = ? 
+				  AND	pkey > ?
+				ORDER BY pkey
+				LIMIT	$stride
+END
+		} else {
+			$gs = $oops->{dbo}->adhoc_query(<<END, execute => [ $id ]);
+				SELECT	pkey, pval, ptype
+				FROM	TP_attribute
+				WHERE	id = ? 
+				ORDER BY pkey
+				LIMIT	$stride
+END
+		}
+		my @ret;
+		my ($pkey, $pval, $ptype);
+		while (($pkey, $pval, $ptype) = $gs->fetchrow_array()) {
+			{ no warnings; print "%*$id vAUTO_SLICE: query: '$pkey' ($pval/$ptype)\n" if $debug_virtual_hash};
+			no warnings qw(uninitialized);
+			if (exists $dcache->{$pkey}) {
+				print "%$id - nextpkey deleted\n" if $debug_demand_iterator;
+				next;
+			}
+			unless ($oops->{args}{less_caching}) {
+				if ($ptype) {
+					$ovcache->{$pkey} = [ $pval, $ptype ];
+				} else {
+					$rcache->{$pkey} = $pval;
+				}
+			}
+			if (exists $wcache->{$pkey}) {
+				print "%$id - nextpkey is in wcache\n" if $debug_demand_iterator;
+				next;
+			}
+			push(@ret, $pkey);
+		}
+		$gs->finish();
+		return @ret;
+	}
+
 	sub SCALAR
 	{
 		my ($self) = @_;
@@ -3655,8 +3816,8 @@ sub tied_hash_reference
 			$loadpkeyQ = $oops->query('loadpkey')
 				unless $loadpkeyQ;
 			$loadpkeyQ->execute($id, $pkey);
-			my ($pval, $ptype);
-			if (($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
+			if (my ($pval, $ptype) = $loadpkeyQ->fetchrow_array) {
+				$loadpkeyQ->finish();
 				if ($ptype) {
 					$ovcache->{$pkey} = [ $pval, $ptype ];
 				} else {
@@ -3668,8 +3829,8 @@ sub tied_hash_reference
 				$necache->{$pkey} = 1;
 				print "%*$id/'$pkey' vSCALAR: not found in db\n" if $debug_virtual_hash;
 			}
+			die if $loadpkeyQ->{Active}; # debug
 		}
-		$loadpkeyQ->finish() if $loadpkeyQ;
 
 		print "%*$id' vSCALAR: original key count = $vars->{originalKeyCount}\n" if $debug_virtual_hash;
 		print "%*$id' vSCALAR: deleted/replaced count: $doriginal\n" if $debug_virtual_hash;
@@ -3738,9 +3899,10 @@ sub tied_hash_reference
 	sub virtual_object	{ my $self = shift; my $tied = tied %$self; $tied->[0]->virtual_object(@_); }
 	sub workaround27555	{ my $self = shift; my $tied = tied %$self; $tied->[0]->workaround27555(@_); }
 	sub load_object		{ my $self = shift; my $tied = tied %$self; $tied->[0]->load_object(@_); } 
-	sub dbh			{ my $self = shift; my $tied = tied %$self; $tied->[0]->{dbh} }
+	sub dbh			{ my $self = shift; my $tied = tied %$self; $tied->[0]->{dbo}->dbh }
 	sub clear_cache		{ my $self = shift; my $tied = tied %$self; $tied->[0]->clear_cache(@_); }
-
+	sub lock		{ my $self = shift; my $tied = tied %$self; $tied->[0]->lock(@_); }
+	sub oops		{ my $self = shift; my $tied = tied %$self; return $self }
 }
 
 #	-	-	-	-	-	-	-	-	-	-	- 

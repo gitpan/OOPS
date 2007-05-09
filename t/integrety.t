@@ -1,5 +1,6 @@
 #!/usr/bin/perl -I../lib -I..
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
@@ -169,6 +170,28 @@ if (0) {
 	samesame($t23, $t23a);
 }
 resetall; # --------------------------------------------------
+{
+	my $a1 = [ 'A', 'B', 'C', 'D', 'E' ];
+	my $a2 = [ 'F', 'G', 'H', 'I', 'J' ];
+
+	$r1->{named_objects}{a1} = $a1;
+	$r1->{named_objects}{a2} = $a2;
+	$r1->commit;
+
+	rcon;
+
+	my $e1 = $r1->{named_objects}{a1};
+	pop(@$e1);
+	pop(@$a1);
+	$r1->commit;
+
+	rcon;
+
+	my $f1 = $r1->{named_objects}{a1};
+	samesame($a1, $f1);
+	samesame($a1, $e1);
+}
+resetall; # --------------------------------------------------
 if ($multiread) {
 
 	my $a = { a => 1, };
@@ -296,28 +319,6 @@ END
 
 	samesame(\@k5, \@kk5);
 
-}
-resetall; # --------------------------------------------------
-{
-	my $a1 = [ 'A', 'B', 'C', 'D', 'E' ];
-	my $a2 = [ 'F', 'G', 'H', 'I', 'J' ];
-
-	$r1->{named_objects}{a1} = $a1;
-	$r1->{named_objects}{a2} = $a2;
-	$r1->commit;
-
-	rcon;
-
-	my $e1 = $r1->{named_objects}{a1};
-	pop(@$e1);
-	pop(@$a1);
-	$r1->commit;
-
-	rcon;
-
-	my $f1 = $r1->{named_objects}{a1};
-	samesame($a1, $f1);
-	samesame($a1, $e1);
 }
 resetall; # --------------------------------------------------
 {
@@ -763,9 +764,9 @@ resetall; # --------------------------------------------------
 	my (@k) = sort keys %{$r1->load_object(2)};
 	my @kk;
 	if ($dbms =~ /sqlite/) {
-		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'last reserved object id', 'user objects');
+		(@kk) = ('GC GENERATION', 'SCHEMA_VERSION', 'VERSION', 'counters', 'gc extra todo', 'internal objects', 'last reserved object id', 'user objects');
 	} else {
-		(@kk) = ('SCHEMA_VERSION', 'VERSION', 'counters', 'internal objects', 'user objects');
+		(@kk) = ('GC GENERATION', 'SCHEMA_VERSION', 'VERSION', 'counters', 'gc extra todo', 'internal objects', 'user objects');
 	}
 
 

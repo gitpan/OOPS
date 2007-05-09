@@ -1,5 +1,6 @@
 #!/usr/bin/perl -I../lib -I..
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
@@ -100,7 +101,7 @@ resetall; # --------------------------------------------------
 		COMPARE
 
 		CP_VIRTUAL
-		$tcTODO = "Mysql columns are a bit narrow" if $r1->{dbms} eq 'mysql';
+		$tcTODO = "Mysql columns are a bit narrow" if $r1->{dbo}{dbms} eq 'mysql';
 		%$root = ();
 		my $x = getref(%$root, 'FOO23' x 57);
 		$root->{'FOO23' x 57} = \$x;

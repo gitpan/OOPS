@@ -3,6 +3,7 @@
 use warnings;
 use strict;
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 #
 # these are tests that confirm how perl works.
 #

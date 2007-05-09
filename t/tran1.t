@@ -1,5 +1,6 @@
 #!/usr/bin/perl -I../lib -I..
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
@@ -32,6 +33,8 @@ BEGIN {
 
 my $itarations = 200;
 $itarations /= 10 unless $ENV{OOPSTEST_SLOW};
+
+my $maxtries = 50;
 
 my $common;
 
@@ -98,10 +101,12 @@ ab:
 	# Using $common{$process_name} to moderate, we loop until
 	# all processes have had a sucessful transaction
 	#
+	my $tries = 0;
 	for(;;) {
 		my $try = 0;
 		my $done = 1;
 		print STDERR "# top of loop [$pn]\n" if $debug;
+		last if $tries++ >= $maxtries;
 ab:
 		print STDERR "# running [$pn]\n" if $debug;
 		rcon;

@@ -1,14 +1,9 @@
 #!/usr/bin/perl -I../lib -I.. 
 
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::SelfFilter::defeat = 1
 		unless defined $OOPS::SelfFilter::defeat;
-}
-BEGIN {
-	#if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
-	#	print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
-	#	exit;
-	#}
 }
 
 print "1..4\n";
@@ -19,16 +14,21 @@ use OOPS::TestCommon;  # creates database
 
 nocon;
 db_drop();
+nocon;
 
 my %args2 = %args;
 delete $args2{no_front_end};
 
-eval { local $SIG{'__DIE__'}; $fe = OOPS->new(%args2) };
+eval { $fe = OOPS->new(%args2) };
 
-test($@ =~ /DBMS not initialized/, $@);
+# print "# error = $@\n";
+test($@ =~ /DBMS not initialized/, "error = '$@'");
 undef $fe;
 
-eval { db_drop() };
+db_drop();
+
+nocon;
+print "#			the test begins...\n";
 
 eval {
 	$fe = OOPS->new(%args2, auto_initialize => 1);
@@ -44,7 +44,7 @@ test(! $@, $@);
 eval {
 	$fe = OOPS->new(%args2, auto_initialize => 1);
 
-	test($fe->{xyz}{abc} == 123);
+	test($fe && $fe->{xyz} && $fe->{xyz}{abc} && $fe->{xyz}{abc} == 123);
 
 	undef $fe;
 };

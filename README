@@ -114,78 +114,99 @@ SUPPORTED DATA TYPES
     manually broken to assure de-allocation.
 
 SUPPORTED PLATFORMS
-    The following RDBMSs are supported in the code:
+    The following RDBMSs are supported by the code:
 
-    PostgreSQL     OOPS 1.004 has been tested with PostgreSQL version 8.1.4
-                   on Linux. OOPS 1.003 was tested with 7.4.2 and 7.3.5 on
-                   Linux and 7.3.5 on pre-release DragonflyBSD. Somewhere
-                   between 7.4.2 and 8.1.4 PostgreSQL got more strict about
-                   TEXT versus BYTEA types. OOPS 1.003 was using TEXT where
-                   it should have been using BYTEA. Be sure to upgrade OOPS
-                   to 1.004 *before* upgrading PostgreSQL to 8.x.
+    PostgreSQL     OOPS 0.2002 has been tested with PostgreSQL version 8.1.8
+                   on Linux. OOPS 0.1004 was tested with PostgreSQL version
+                   8.1.4 on Linux. OOPS 0.1003 was tested with 7.4.2 and
+                   7.3.5 on Linux and 7.3.5 on pre-release DragonflyBSD.
+                   Somewhere between 7.4.2 and 8.1.4 PostgreSQL got more
+                   strict about TEXT versus BYTEA types. OOPS 1.003 was
+                   using TEXT where it should have been using BYTEA. Be sure
+                   to upgrade OOPS to 0.1004 or later *before* upgrading
+                   PostgreSQL to 8.x or later.
 
-                   Biggest issue: PostgreSQL runs the test suite slowly.
+                   Biggest issue: PostgreSQL runs the test suite more slowly
+                   than mysql or SQLite.
 
-    mysql          OOPS 1.004 has been tested with mysql 4.1.15 on Linux.
-                   OOPS 1.003 was tested with mysql 4.0.16 and 4.0.18 using
+                   On rare occaision PostgresSQL will fail with an "ERROR:
+                   duplicate key violates unique constraint" error. If this
+                   happens inside a call to "transaction()" it will
+                   automatically restart. You only need to worry about this
+                   if you are not using "transaction()".
+
+    mysql          OOPS 0.2002 has been tested with mysql 5.0.22 on Linux.
+                   OOPS 0.1004 has been tested with mysql 4.1.15 on Linux.
+                   OOPS 0.1003 was tested with mysql 4.0.16 and 4.0.18 using
                    InnoDB tables.
 
                    The OOPS schema for mysql does not support large (>256
                    byte) hash keys.
 
-                   Biggest issue: Mysql 4.1.15 (at least) detects some
-                   deadlocks very slowly.
-                   <http://bugs.mysql.com/bug.php?id=20857>.
+                   Mysql locking doesn't work correctly. To get correct
+                   behavior, access to the database must be exclusive
+                   <http://bugs.mysql.com/?id=28029>. Once that's fixed,
+                   there is a still a problem that it detects some deadlocks
+                   very slowly: <http://bugs.mysql.com/bug.php?id=20857>.
 
-    SQLite         DBD::SQLite versions 0.x use SQLite 2.x. DBD::SQLite
-                   versions 1.x use SQLite 3.x. DBD::SQLite versions 1.x
-                   leak file descriptors and will eventually die if you
-                   create use and destroy too many OOPS instances. This
-                   prefents DBD::SQLite version 1.x from passing the OOPS
-                   regression tests.
-
-                   If you're using OOPS 1.003 and DBD::SQLite 0.x then
-                   upgrade OOPS to 1.004 and switch to DBD::SQLite2. Make
-                   both changes at the same time.
-
-                   OOPS 1.004 has been tested with DBD::SQLite2 0.33. OOPS
-                   1.003 was tested with DBD::SQLite 0.31.
+    SQLite2        DBD::SQLite versions 0.x use SQLite 2.x. DBD::SQLite2 is
+                   the continuation of DBD::SQLite version 0.x codebase and
+                   uses SQLite 2.x.
 
                    DBD::SQLite2 is not 8-bit clean with respect to "\0".
                    OOPS uses a DBD::SQLite2 feature to translate binary
                    nulls. A side-effect is that backslash will be doubled
                    "\" -> "\\" in DBD::SQLite2 (the extras will be removed
-                   transparently by DBD::SQLite2. OOPS does not use the
-                   "counters" table with DBD::SQLite2 (or DBD::SQLite). As
-                   of 1.004, OOPS doesn't make use of the newer (version
-                   1.x) DBD::SQLite features for handling nulls.
+                   transparently by DBD::SQLite2.
 
-                   <http://www.hwaci.com/sw/sqlite/>
+                   OOPS does not use the "counters" table with DBD::SQLite2.
 
-                   Biggest issues: SQLite3 fails
-                   (<http://rt.cpan.org/Ticket/Display.html?id=20286>);
-                   SQLite3 leaks memory
-                   (<http://rt.cpan.org/Ticket/Display.html?id=20288>);
-                   SQLite2 and SQLite3 both do database-level locking only.
+    SQLite         DBD::SQLite versions 1.x use SQLite 3.x.
+
+                   DBD::SQLite versions 1.x leak file descriptors and will
+                   eventually die if you create use and destroy too many
+                   OOPS instances. DBD::SQLite versions 1.x cannot pass the
+                   regression suite and may not be reliable in production
+                   use. Use DBD::SQLite2 instead.
+
+                   OOPS does not use the "counters" table with DBD::SQLite.
+
+                   SQLite is not 8-bit clean with respect to "\0". OOPS uses
+                   a DBD::SQLite feature to translate binary nulls. A
+                   side-effect is that backslash will be doubled "\" -> "\\"
+                   in DBD::SQLite (the extras will be removed transparently
+                   by DBD::SQLite. As of 0.2002, OOPS doesn't make use of
+                   the newer (version 1.x) DBD::SQLite features for handling
+                   nulls.
+
+                   To work around the problem with the leaked file
+                   descriptors, on systems that support "/proc", file
+                   descriptors in excess of
+                   $OOPS::sqlite_v3::enable_fd_leak_workaround (500 by
+                   default) that match the sqlite database file will be
+                   closed when new OOPS instances are created. This
+                   sometimes helps. Set
+                   $OOPS::sqlite_v3::enable_fd_leak_workaround to 0 to
+                   disable.
+
+                   Related bug reports:
+                   <http://rt.cpan.org/Ticket/Display.html?id=20286>,
+                   <http://rt.cpan.org/Ticket/Display.html?id=20288>.
 
     Perl versions 5.8.2 through 5.8.7 are supported. Prior to 5.8.2, it
     wasn't possible to untie scalars from within the a tied scalar access
     method. An ugly workaround is possible if there is enough interest.
 
-    OOPS 1.004 has been tested on Linux 2.6.15 (Ubuntu 6.06LTS - Dapper
-    Drake). OOPS 1.003 was tested on Linux 2.4.23 (Debian unstable as of
-    April '04); on FreeBSD 4.9; and on DragonflyBSD prerelease.
+    OOPS 0.2002 and 0.1004 have been tested on Linux 2.6.15 (Ubuntu 6.06LTS
+    - Dapper Drake). OOPS 0.1003 was tested on Linux 2.4.23 (Debian unstable
+    as of April '04); on FreeBSD 4.9; and on DragonflyBSD prerelease.
 
     As far as performance goes, mysql and SQLite are both about twice as
     fast as PostgreSQL for applications that only have one transaction at at
-    time. SQLite is particularly slow when there are multiple transactions
-    as its lock granularity is the entire database. Mysql also slows down
-    when there are multiple simultaneous transactions. I don't know yet
-    which back-end is fastest for applications with many simultaneous
-    transactions.
+    time. SQLite and mysql are particularly slow when there are multiple
+    transactions as their lock granularity is the entire database.
 
-    The RDBMS schema for SQLite is different than for mysql or PostgreSQL
-    (which are nearly the same as each other).
+    Each RDBMS uses a somewhat different schema.
 
 FUNCTIONS
     "transaction($funcref, @args)"
@@ -229,6 +250,26 @@ FUNCTIONS
         your code so that it doesn't have any external side effects until
         after it calls commit().
 
+        The following package variables are available during transactions:
+
+        $OOPS::transaction_tries
+            The number of attempts at this transaction. Starts with 1.
+
+        $OOPS::transaction_maxtries
+            The maximum number of attempts that will be made.
+
+        $OOPS::transaction_failure_sleep
+            The minimum amount of time to "sleep()" if the transaction
+            fails.
+
+        $OOPS::transaction_failure_maxsleep
+            The maximum amount of time to "sleep()" if the transaction
+            fails.
+
+        @OOPS::transaction_rollback
+            A list of functions to call in the event of a transaction
+            rollback (code refs).
+
     "getref(%hash, $key)"
         References to tied hash keys are buggy in all perls through 5.8.7
         (and beyond?). Use "getref(%hash, $key)" to create your reference to
@@ -243,6 +284,97 @@ FUNCTIONS
         Getref() and workaround27555() work around all the perl bugs with
         tied hash key references. Failure to use them may result in
         unexpected and inconsistent results.
+
+    "walk_hash(%hash, $stride, [ $previous_last_key ])"
+        If you have a large virtual hash, you may want to be able to iterate
+        over the keys in the hash as a bunch of transactions rather than as
+        one transaction.
+
+        Walk_hash() can be called on any HASH. If it isn't an OOPS virtual
+        hash, it will return keys in batches just like if it had been called
+        on an OOPS virtual hash.
+
+        Here is an example of how to use it:
+
+         my $stride = 20;
+         my $done = 0;
+         my $lastkey;
+         while (not $done) {
+                transaction(sub {
+                        my $oops = OOPS->new(...);
+                        my @things = walk_hash(%{$oops->{my_table}}, $stride, $lastkey);
+                        for my $thing (@things) {
+                                # do stuff
+                        }
+                        $lastkey = $things[$#things];
+                        $done = 1 unless @things == $stride;
+                });
+         }
+
+        Here is another example of how to use it (with OOPS::TxHash):
+
+         use OOPS::TxHash;
+
+         my $stride = 20;
+
+         my %real_todo = ( stuff => undef );
+         while (%real_todo) {
+                transaction(sub {
+                        my $th = tie my %todo, 'OOPS::TxHash', \%real_todo or die;
+                        my $oops = OOPS->new(...);
+
+                        if (exists $todo{stuff}) {
+                                my @keys = walk_hash(%{$oops->{stuff}}, $stride, $todo{stuff});
+
+                                for my $k (@keys) {
+                                        # work on $oops->{stuff}{$k}
+                                }
+
+                                $todo{stuff} = $keys[$#keys];
+                                delete $todo{stuff} unless @keys == $stride;
+                        }
+
+                        $oops->commit;
+                        $th->commit;
+                });
+         }
+
+        Here is yet another example (with a wrapper function):
+
+         walk_eval(20, 
+                sub { OOPS->new(...) },
+                sub { my $oops = shift; $oops->{my_table} },
+                sub { 
+                        my ($oops, $thing) = @_;
+                        # do stuff
+                },
+                allatonce => 0
+         );
+
+         sub walk_eval
+         {
+                my ($stride, $get_oops, $get_hash, $agent, %opts) = @_;
+                my $done = 0;
+                my $last = undef;
+                $stride ||= 100;
+                while (! $done) {
+                        transaction(sub {
+                                my $oops = &$get_oops();
+                                my $hash = &$get_hash($oops);
+                                my @items = walk_hash(%$hash, $stride, $last);
+                                if ($opts{allatonce}) {
+                                        &$agent($oops, @items);
+                                } else {
+                                        for my $item (@items) {
+                                                &$agent($oops, $item);
+                                        }
+                                }
+                                $oops->commit();
+                                $last = $items[$#items];
+                                $done = 1 unless @items == $stride;
+                        });
+                }
+         }
 
 PUBLIC CLASS METHODS
     "OOPS->new(%parameters)"
@@ -380,7 +512,8 @@ PUBLIC OBJECT METHODS
     "->dbh()"
         This returns the main DBI database handle used by OOPS. This
         function is provided for those who want to hand-write queries.
-        Please note: no changes are written to the DBMS until commit().
+        Please note: no changes are written to the DBMS by OOPS until
+        "$oops-"commit()>.
 
     "->load_object($id)"
         This will load a persistent object by number. It returns the object
@@ -538,9 +671,7 @@ LIMITATIONS, ERRATA, DEVELOPMENT STATUS, COMMUNITY, BUGS, AND BUG BOUNTY
         on FreeBSD uses perl's "malloc()".
 
 SCHEMA VERSIONS
-    As OOPS is developed, the schema that OOPS uses changes. At the current
-    time, all versions of OOPS use forward and backwards compatible (though
-    not identical) schemas.
+    As OOPS is developed, the schema that OOPS uses changes.
 
     OOPS notices if the version of the schema in the DBMS is different than
     the version the code currently supports. When this happens there are two
@@ -550,6 +681,17 @@ SCHEMA VERSIONS
 
     This behavior allows the OOPS module to be upgraded without disrupting
     installed applications.
+
+DATABASE ADMINISTRATION
+    Like Perl, OOPS uses reference counting. If you have circular data
+    structures and you delete all you references to the circular data
+    structure, you'll leak persistent memory.
+
+    Use OOPS::GC to mop up the leak.
+
+    Previous versions of OOPS have had bugs that caused the reference counts
+    on the persistent data to become inaccurate. Use OOPS::Fsck to fix such
+    problems.
 
 FUTURE DIRECTIONS
     OOPS isn't done. There are a bunch of things that I am considering
@@ -620,11 +762,6 @@ FUTURE DIRECTIONS
         It is possible to support storing tied data. The tied object is what
         would need to be persistent. This would only work on some kinds of
         ties.
-
-    garbage collect circular references
-        Like perl, OOPS uses reference counting to know when to delete an
-        object. Unlike a normal program, restarting your program does not
-        clear out the circular references.
 
     support for other base types.
         Right now, just HASH, SCALAR, REF, and ARRAY are supported. Regular
@@ -851,10 +988,10 @@ RUNNING THE REGRESSION TEST SUITE
     about your configuration.
 
     Beware mysql logging. On Debian unstable, the default configuration for
-    mysql logs every SQL statement. Running the test suite to completion
-    will generate several gigabytes of log file. Running out of disk space
-    will cause the tests to fail. On DragonflyBSD (FreeBSD 4.9) the default
-    mysql configuration includes making replication master logs.
+    mysql used to log every SQL statement. Running the test suite to
+    completion will generate several gigabytes of log file. Running out of
+    disk space will cause the tests to fail. On DragonflyBSD (FreeBSD 4.9)
+    the default mysql configuration includes making replication master logs.
 
 THE COMPETITION
     There are a number of other modules that make perl objects persistent.
@@ -922,6 +1059,9 @@ THE COMPETITION
 
     see also
         <http://poop.sourceforge.net/> has an overview of options.
+
+EXAMPLE PROGRAMS
+    The following applications uses OOPS: Qpsmtpd::Plugin::Quarantine
 
 LICENSE
     This software is available with and without the GPL: please write if you

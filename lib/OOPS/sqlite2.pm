@@ -1,7 +1,7 @@
 
 package OOPS::sqlite2;
 
-@ISA = qw(OOPS Exporter);
+@ISA = qw(OOPS::DBO Exporter);
 @EXPORT = qw(
 	tabledefs
 	table_list
@@ -19,11 +19,21 @@ our $big_blob_size = 900*1024;
 
 # PRAGME integrity_check; ???
 
+sub new
+{
+	my $pkg = shift;
+	my $dbo = OOPS::DBO->new(@_);
+	$dbo->{dbms} = 'sqlite2';
+	bless $dbo, $pkg;
+}
+
+sub tmode {}
+
 sub initialize
 {
-	my $oops = shift;
+	my $dbo = shift;
 
-	my $dbh = $oops->{dbh};
+	my $dbh = $dbo->{dbh};
 	$dbh->{sqlite_handle_binary_nulls} = 1;
 
 	# 
@@ -34,13 +44,13 @@ sub initialize
 	#
 	$dbh->func(10_000, 'busy_timeout');
 
-	if ($oops->{args}{default_synchronous} || $ENV{OOPS_SYNC}) {
-		my $sm = $dbh->prepare("PRAGMA default_synchronous = $oops->{args}{default_synchronous};") || confess $dbh->errstr;
+	my $sync = $dbo->{default_synchronous} || $ENV{OOPS_SYNC};
+	if ($sync) {
+		my $sm = $dbh->prepare("PRAGMA default_synchronous = $sync;") || confess $dbh->errstr;
 		$sm->execute || confess $sm->errstr;
 	}
 
-	#my $tmode = $dbh->prepare('END TRANSACTION; BEGIN TRANSACTION ON CONFLICT ROLLBACK') || confess;
-	#$tmode->execute() || die $tmode->errstr;
+	$dbo->{sqlite_version} = 2;
 }
 
 sub tabledefs
@@ -57,7 +67,8 @@ sub tabledefs
 		rfe		CHAR(1),		# reserved for future expansion
 		alen		INT,			# array length
 		refs		INT, 			# references
-		counter		SMALLINT
+		counter		INT,
+		gcgeneration	INT DEFAULT 1
 		);
 
 	CREATE INDEX TP_group_index ON TP_object (loadgroup);
@@ -96,9 +107,10 @@ sub table_list
 
 sub db_initial_values
 {
+	require OOPS::Setup;
 	return <<END;
-	INSERT INTO TP_object values(100, 100, 'HASH', 'H', 'V', '0', '0', 0, 1, 1);
-	INSERT INTO TP_attribute values(2, 'last reserved object id', 100, 'R');
+	INSERT INTO TP_object values(100, 100, 'HASH', 'H', 'V', '0', '0', 0, 1, 1, $OOPS::gcgenstart);
+	INSERT INTO TP_attribute values(2, 'last reserved object id', $OOPS::last_reserved_oid, 'R');
 END
 }
 
@@ -109,8 +121,8 @@ sub allocate_id
 
 sub post_new_object
 {
-	my $oops = shift;
-	return $oops->{dbh}->func('last_insert_rowid');
+	my $dbo = shift;
+	return $dbo->{dbh}->func('last_insert_rowid');
 }
 
 sub byebye
@@ -136,6 +148,19 @@ sub initial_query_set
 END
 }
 
+sub rebless
+{
+	my ($dbo, $oops) = @_;
+	bless $oops, 'OOPS::sqlite2::subclass';
+}
+
+package OOPS::sqlite2::subclass;
+
+use strict;
+use Carp qw(confess);
+
+our @ISA = qw(OOPS Exporter);
+
 sub load_big
 {
 	my ($oops, $id, $pkey) = @_;
@@ -157,8 +182,8 @@ sub save_big
 	my $id = shift;
 	my $pkey = shift;
 	my $savebigQ = $oops->query('savebig');
-	for (my $fragno = 0; $fragno * $big_blob_size < length($_[0]); $fragno++) {
-		$savebigQ->execute($id, $pkey, $fragno, substr($_[0], $fragno * $big_blob_size, $big_blob_size)) || confess;
+	for (my $fragno = 0; $fragno * $OOPS::sqlite2::big_blob_size < length($_[0]); $fragno++) {
+		$savebigQ->execute($id, $pkey, $fragno, substr($_[0], $fragno * $OOPS::sqlite2::big_blob_size, $OOPS::sqlite2::big_blob_size)) || confess $savebigQ->errstr;
 	}
 }
 
