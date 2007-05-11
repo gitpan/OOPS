@@ -1,6 +1,6 @@
 #!/usr/bin/perl -I../lib -I..
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
 BEGIN {
 	$OOPS::OOPS1004::SelfFilter::defeat = 1
 		unless defined $OOPS::OOPS1004::SelfFilter::defeat;

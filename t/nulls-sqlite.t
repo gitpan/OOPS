@@ -3,7 +3,7 @@
 my $dbi_trace_turnon = 9999999999;
 my $dbi_trace_level = 0;
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS/blib/lib$!/OOPS/t!g ? $x : ()})}
+BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
 BEGIN {
 	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
 		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";

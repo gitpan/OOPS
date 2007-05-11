@@ -22,7 +22,7 @@
 
 package OOPS;
 
-our $VERSION = 0.2002;
+our $VERSION = 0.2003;
 our $SCHEMA_VERSION = 1005;
 
 require 5.008002;
