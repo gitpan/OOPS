@@ -6,6 +6,8 @@ package OOPS::mysql;
 use strict;
 use warnings;
 
+my %version_cache;
+
 sub tmode
 {
 	my ($dbo, $dbh, $readonly) = @_;
@@ -30,6 +32,35 @@ sub initialize
 
 	# $dbo->tmode;
 
+	unless ($version_cache{$dbo->{database}}) {
+		my $dbh = $dbo->{dbh};
+		my $q = $dbo->adhoc_query("SELECT version()") 
+			or confess $dbo->{dbh}->errstr();
+		$q->execute() or confess $dbo->{dbh}->errstr();
+		my ($v) = $q->fetchrow_array();
+		$version_cache{$dbo->{database}} = $v;
+	}
+	$dbo->{mysql_version} = $version_cache{$dbo->{database}};
+	unless (defined $dbo->{mysql_for_update}) {
+		#
+		# 5.0.45-Debian_1ubuntu3.1-log
+		# 
+		# Somewhere between 5.0.22 and 5.0.45, SERIALIZABLE
+		# started working properly.  Before then FOR UPDATE
+		# needed to be added to every query.
+		#
+		my $v = $dbo->{mysql_version};
+		$v =~ m/^((?:\d+\.)+\d+)/;
+		my $ver = $1;
+		die unless $ver;
+		my (@ver) = split(/\./, $ver);
+		my $cver = $ver[0] + $ver[1] / 1000 + $ver[2] / 1_000_000;
+		if ($cver >= 5.000045) {
+			$dbo->{mysql_for_update} = 0;
+		} else {
+			$dbo->{mysql_for_update} = 1;
+		}
+	}
 	$dbo->{counterdbh} = $dbo->dbiconnect(%$dbo, readonly => 1);
 	$dbo->{id_pool_start} = 0;
 	$dbo->{id_pool_end} = 0;
@@ -104,7 +135,15 @@ sub clean_query
 	if ($query =~ /\bSELECT\b/i && ! $dbo->{readyonly}) {
 		$query =~ s/;//;
 		# $query .= " LOCK IN SHARE MODE";
-		$query .= " FOR UPDATE";
+		# $query .= " FOR UPDATE";
+		if ($dbo->{mysql_for_update}) {
+			# great
+		} elsif (defined $dbo->{mysql_for_update}) {
+			$query .= " FOR UPDATE";
+		} else {
+			warn "dbo->mysql_for_update not defined";
+			$query .= " FOR UPDATE";
+		}
 	}
 	1 while $query =~ s/  +/ /g;  # query log is easier to debug
 	return $dbo->SUPER::clean_query($query);

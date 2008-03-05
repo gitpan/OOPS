@@ -78,7 +78,10 @@ sub gc
 			FROM TP_attribute
 			WHERE id = 2 AND pkey = 'GC GENERATION'
 END
-		confess $dbh->errstr() unless $gcgen;
+		unless ($gcgen) {
+			print "### ERROR: ".$dbh->errstr()."\n";
+			confess $dbh->errstr() 
+		}
 		my $old = $gcgen++;
 		print "# GC: New generation number: $gcgen\n";
 		$dbh->do(&$TPsub(<<END), undef, $gcgen, $old) or confess $dbh->errstr;

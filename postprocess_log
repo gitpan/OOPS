@@ -23,7 +23,7 @@ my %commit;
 open(FILE, "<$ARGV[0]") || die;
 while(<FILE>) {
 	chomp;
-	die $_ unless /^\t\t  (\d+\.\d+) (\S+)(?: (.*))?/;
+	next unless /^\t\t  (\d+\.\d+) (\S+)(?: (.*))?/;
 	my ($proc, $code, $stuff) = ($1, $2, $3);
 	$proc = $procs{$proc} || ($procs{$proc} = $procs++);
 
@@ -36,7 +36,11 @@ close(FILE);
 open(FILE, "<$ARGV[0]") || die;
 while(<FILE>) {
 	chomp;
-	die $_ unless /^\t\t  (\d+\.\d+) (\S+)(?: (.*))?/;
+	unless (/^\t\t  (\d+\.\d+) (\S+)(?: (.*))?/) {
+		print;
+		print "\n";
+		next;
+	}
 	my ($proc, $code, $stuff) = ($1, $2, $3);
 	$proc = $procs{$proc} || ($procs{$proc} = $procs++);
 	my $commit = $commit{$proc}

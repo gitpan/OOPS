@@ -1,5 +1,5 @@
 
-# Copyright(C) 2004-2007 David Muir Sharnoff <muir@idiom.com>
+# Copyright(C) 2004-2008 David Muir Sharnoff <muir@idiom.com>
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
 
 package OOPS;
 
-our $VERSION = 0.2003;
+our $VERSION = 0.2004;
 our $SCHEMA_VERSION = 1005;
 
 require 5.008002;

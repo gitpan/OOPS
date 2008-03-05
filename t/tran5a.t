@@ -19,15 +19,7 @@ use Clone::PP qw(clone);
 
 modern_data_compare();
 BEGIN {
-	if ($dbms =~ /sqlite|mysql/) {
-		print "# Mysql can't do this because we're currently running\n";
-		print "# all SELECTs with FOR UPDATE on them and that single-\n";
-		print "# threads access to the database.\n";
-		print "# Sqlite can't do this because it only does database-level\n";
-		print "# locking\n";
-		print "1..0 # Skipped: this test not supported on $dbms\n";
-		exit;
-	}
+	nocon;
 
 	unless (eval { require Test::MultiFork}) {
 		print "1..0 # Skipped: this test requires Test::MultiFork\n";
@@ -47,11 +39,6 @@ BEGIN {
 
 my $looplength = 1000;
 $looplength /= 10 unless $ENV{OOPSTEST_SLOW};
-if ($ENV{OOPSTEST_DSN} && $ENV{OOPSTEST_DSN} =~ /^dbi:mysql/i) {
-	printf STDERR "# mysql is very slow at this test, reducing iterations from %d to %d\n",
-		$looplength, $looplength / 20;
-	$looplength = int($looplength/20);
-}
 $OOPS::debug_dbidelay = 0;
 $debug = 0;
 
@@ -67,6 +54,9 @@ FORK_ab:
 ab:
 my $pn = (procname())[1];
 srand($$);
+
+print "# PROCESS $pn IS ALIVE\n";
+nocon;
 
 a:
 	my $to = 'jane';
@@ -92,16 +82,17 @@ a:
 		}
 	);
 	$r1->commit;
-	rcon;
+	nocon;
 	groupmangle('manygroups');
 	rcon;
 	my (@bal) = map(values %{$r1->{named_objects}{$_}}, qw(joe jane bob));
 	no warnings;
 	test(sum(@bal) == 100, "coins @bal");
 	use warnings;
-	$r1->DESTROY;
+	nocon;
 
 ab:
+	printf "# at %d\n", __LINE__;
 	if ($x > $looplength/2) {
 		$OOPS::debug_dbidelay = 1;
 	}

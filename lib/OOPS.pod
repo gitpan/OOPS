@@ -146,6 +146,7 @@ if you are not using C<transaction()>.
 
 =item mysql
 
+OOPS 0.2003 has been tested with mysql 5.0.45 on Linux.
 OOPS 0.2002 has been tested with mysql 5.0.22 on Linux.
 OOPS 0.1004 has been tested with mysql 4.1.15 on Linux.
 OOPS 0.1003 was tested with mysql 4.0.16 and 4.0.18 using InnoDB tables. 
@@ -155,8 +156,7 @@ keys.
 
 Mysql locking doesn't work correctly.  To get correct behavior, access
 to the database must be exclusive L<http://bugs.mysql.com/?id=28029>.
-Once that's fixed, there is a still a problem that it detects some 
-deadlocks very slowly: L<http://bugs.mysql.com/bug.php?id=20857>.
+This problem is fixed in 5.0.45.
 
 =item SQLite2
 
@@ -816,12 +816,6 @@ in OOPS itself.
 The initial releases of OOPS concentrated on correct behavior
 and other aspects of the module were somewhat ignored.	The code
 could be cleaned up a bunch. 
-
-=item better concurrency
-
-With the transaction model of SERIALIZABLE on mysql, there are 
-serious performance issues surrounding access to the main hash.
-Change to a different transaction model or DBMS.
 
 =item perl-syntax SQL query translator
 

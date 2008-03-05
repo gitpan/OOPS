@@ -135,7 +135,8 @@ SUPPORTED PLATFORMS
                    automatically restart. You only need to worry about this
                    if you are not using "transaction()".
 
-    mysql          OOPS 0.2002 has been tested with mysql 5.0.22 on Linux.
+    mysql          OOPS 0.2003 has been tested with mysql 5.0.45 on Linux.
+                   OOPS 0.2002 has been tested with mysql 5.0.22 on Linux.
                    OOPS 0.1004 has been tested with mysql 4.1.15 on Linux.
                    OOPS 0.1003 was tested with mysql 4.0.16 and 4.0.18 using
                    InnoDB tables.
@@ -145,9 +146,8 @@ SUPPORTED PLATFORMS
 
                    Mysql locking doesn't work correctly. To get correct
                    behavior, access to the database must be exclusive
-                   <http://bugs.mysql.com/?id=28029>. Once that's fixed,
-                   there is a still a problem that it detects some deadlocks
-                   very slowly: <http://bugs.mysql.com/bug.php?id=20857>.
+                   <http://bugs.mysql.com/?id=28029>. This problem is fixed
+                   in 5.0.45.
 
     SQLite2        DBD::SQLite versions 0.x use SQLite 2.x. DBD::SQLite2 is
                    the continuation of DBD::SQLite version 0.x codebase and
@@ -707,11 +707,6 @@ FUTURE DIRECTIONS
         The initial releases of OOPS concentrated on correct behavior and
         other aspects of the module were somewhat ignored. The code could be
         cleaned up a bunch.
-
-    better concurrency
-        With the transaction model of SERIALIZABLE on mysql, there are
-        serious performance issues surrounding access to the main hash.
-        Change to a different transaction model or DBMS.
 
     perl-syntax SQL query translator
          SELECT Employee WHERE $Employee->{salary} > 5000

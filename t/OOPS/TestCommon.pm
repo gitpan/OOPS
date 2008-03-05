@@ -565,6 +565,7 @@ sub groupmangle
 {
 	my ($action) = @_;
 
+	nocon();
 	my $dbo = OOPS->dboconnect(%args) || confess;
 
 	my $q;
