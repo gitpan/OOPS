@@ -1,5 +1,4 @@
 CHANGELOG
-COPYING
 lib/OOPS/DBOdebug.pm
 lib/OOPS/DBO.pm
 lib/OOPS/Fsck.pm
@@ -62,6 +61,7 @@ t/OOPS/OOPS1001/TestCommon.pm
 t/OOPS/OOPS1003/TestCommon.pm
 t/OOPS/OOPS1004/TestCommon.pm
 t/OOPS/TestCommon.pm
+t/OOPS/TestSetup.pm
 t/perlworks2.t
 t/perlworks.t
 t/pod.t

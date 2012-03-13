@@ -8,6 +8,7 @@ use OOPS::DBO;
 use strict;
 use warnings;
 use Carp qw(confess);
+use DBD::Pg qw(:pg_types);
 
 BEGIN {
 	Filter::Util::Call::filter_add(\&OOPS::SelfFilter::filter)
@@ -26,6 +27,25 @@ sub tmode
 		my $tmode = $dbh->prepare('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE') || die;
 		$tmode->execute() || die;
 	}
+}
+
+#
+# Error code that indicates deadlock or clashing transactions.
+#
+sub deadlock_rx
+{
+	return (
+		qr{ERROR:  could not serialize access due to concurrent update},			  	# pg 8.1
+		qr{ERROR:  could not serialize access due to read/write dependencies among transactions}, 	# pg 9.1
+		qr{ERROR:  deadlock detected},
+		qr{ERROR:  duplicate key value violates unique constraint},     				# pg 9.1
+		qr{ERROR:  duplicate key violates unique constraint},						# pg 8.1
+	);
+}
+
+sub nodata_rx
+{
+	return qr/ERROR:  relation "\S+object" does not exist/;
 }
 
 sub initialize
@@ -202,7 +222,7 @@ sub query
 			for (my $i = 0; $i <= $#a; $i++) {
 				if ($dbo->{binary_params}{$q}[$i+1]) {
 					$sth->bind_param($i+1, $a[$i], 
-						{ pg_type => DBD::Pg::PG_BYTEA });
+						{ pg_type => PG_BYTEA });
 				printf "Bind-param %s #%d - binary\n", $q, $i+1 if $OOPS::debug_dbd;
 				} else {
 					$sth->bind_param($i+1, $a[$i]);
@@ -280,8 +300,8 @@ package OOPS::pg::sth;
 
 use strict;
 use warnings;
-use UNIVERSAL qw(can);
 use Carp qw(confess);
+use DBD::Pg qw(:pg_types);
 
 sub new
 {
@@ -299,7 +319,7 @@ sub execute
 		die if ref $values[$i];
 		if ($binary_params->[$i+1]) {
 			$sth->bind_param($i+1, $values[$i], 
-				{ pg_type => DBD::Pg::PG_BYTEA });
+				{ pg_type => PG_BYTEA });
 			printf "Bind-param %s #%d - binary\n", $q, $i+1 if $OOPS::debug_dbd;
 		} else {
 			$sth->bind_param($i+1, $values[$i]);
@@ -315,7 +335,7 @@ sub AUTOLOAD
 	our $AUTOLOAD;
 	my $a = $AUTOLOAD;
 	$a =~ s/.*:://;
-	my $method = can($self->[0],$a) || can($self->[0], $AUTOLOAD) || confess "cannot find method $a for $self->[0]";
+	my $method = $self->[0]->can($a) || $self->[0]->can($AUTOLOAD) || confess "cannot find method $a for $self->[0]";
 	&$method($self->[0], @_);
 }
 

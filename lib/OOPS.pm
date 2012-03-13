@@ -1,28 +1,7 @@
 
-# Copyright(C) 2004-2008 David Muir Sharnoff <muir@idiom.com>
-# 
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-# 
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-# 
-# This software is available without the GPL: please write if you need
-# a non-GPL license.  All submissions of patches must come with a 
-# copyright grant so that David Sharnoff remains able to change the
-# license at will.
-
 package OOPS;
 
-our $VERSION = 0.2004;
+our $VERSION = 0.2005;
 our $SCHEMA_VERSION = 1005;
 
 require 5.008002;
@@ -39,7 +18,6 @@ use Carp qw(confess longmess verbose croak longmess);
 use Scalar::Util qw(refaddr reftype blessed weaken);
 use Hash::Util qw(lock_keys);
 use B qw(svref_2object);
-use UNIVERSAL qw(can);
 require OOPS::DBO;
 
 #
@@ -72,27 +50,8 @@ our @transaction_rollback;
 our $dbi_bug_workaround_count_debug = 0;
 our $gc_overflow_id = 4;
 
-#
-# How do you know the database is deadlocked?
-#
-#	mysql		
-#			Deadlock found when trying to get lock
-#			Lock wait timeout exceeded; try restarting transaction
-# 	 		:Duplicate entry
-#
-#	PostgreSQL	
-#			ERROR:  could not serialize access due to concurrent update
-#			ERROR:  deadlock detected
-#			ERROR:  duplicate key violates unique constraint
-#
-#	SQLite3		
-#			database is locked\(1\) at dbdimp.c line 
-#			database is locked\(5\) at dbdimp.c line 
-#			unable to open database file\(1\) at dbdimp.c  (Random failure, doesn't mean deadlock)
-#
-#			
-
-our $transfailrx = qr/Deadlock found when trying to get lock|ERROR:  could not serialize access due to concurrent update|database is locked\(\d+\) at dbdimp\.c line |unable to open database file\(\d+\) at dbdimp\.c line|ERROR:  deadlock detected|Lock wait timeout exceeded; try restarting transaction|ERROR:  duplicate key violates unique constraint|:Duplicate entry/;
+# This gets updated by OOPS::DBO as backends are used
+our $transfailrx = qr/^wont^match^anything^yet/;
 
 our $id_alloc_size = 10;
 
@@ -409,6 +368,11 @@ END
 
 	return $oops if $args{no_front_end};
 	return OOPS::FrontEnd->new($oops);
+}
+
+sub dbms
+{
+	return OOPS::DBO::dbms(@_);
 }
 
 sub dbiconnect

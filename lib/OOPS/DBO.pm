@@ -13,7 +13,6 @@ package OOPS::DBO;
 use strict;
 use warnings;
 use Carp;
-use UNIVERSAL qw(can);
 use Scalar::Util qw(weaken);
 require OOPS::DBOdebug;
 require Exporter;
@@ -22,6 +21,9 @@ our @ISA = qw(Exporter);
 our @EXPORT = qw(dbiconnect dboconnect $pmatch);
 
 our $backends = qr/(?:mysql|pg|sqlite|sqlite2)/i;
+
+my %loaded;
+my %deadlock_rx;
 
 our $pmatch = qr/
 	(?:
@@ -68,6 +70,7 @@ sub learn_queries
 	my ($dbo, $Q) = @_;
 	while ($Q =~ /\G\t\t([a-z]\w*):((?:\s+\d+)*)\s*(#.*)?\n/gc) {
 		my ($qn, $binary_list, $comment) = ($1, $2);
+		$dbo->{queries}{$qn} = "";
 		while ($Q =~ /\G\t\t\t(.*)\n/gc) {
 			$dbo->{queries}{$qn} .= $1."\n";
 		}
@@ -87,6 +90,9 @@ sub dbiconnect
 	my $user = $args->{user} || $args->{username} || $args->{USER} || $args->{USERNAME};
 	my $password = $args->{pass} || $args->{password} || $args->{PASS} || $args->{PASSWORD};
 	my $prefix = $args->{table_prefix} || $args->{TABLE_PREFIX} || $ENV{OOPS_PREFIX} || '';
+	$user = $user || $ENV{OOPS_USER} || $ENV{DBI_USER};
+	$password = $password || $ENV{OOPS_PASS} || $ENV{DBI_PASS};
+
 	if (! defined($database)) {
 		if (defined($ENV{OOPS_DSN})) {
 			$database = $ENV{OOPS_DSN};
@@ -100,12 +106,10 @@ sub dbiconnect
 			die "no database specified";
 		}
 	}
-	die "no database specified" unless $database;
 	die "only mysql, PostgreSQL & SQLite supported" 
 		unless $database =~ /^dbi:($backends)\b/i;
+	die "no database specified" unless $database;
 	my $dbms = "\L$1";
-	$user = $user || $ENV{OOPS_USER} || $ENV{DBI_USER};
-	$password = $password || $ENV{OOPS_PASS} || $ENV{DBI_PASS};
 
 	my $dbh;
 	unless ($args->{no_dbh}) {
@@ -125,12 +129,21 @@ sub dbiconnect
 
 	require "OOPS/$dbms.pm";
 
-	my $tmode = can("OOPS::$dbms", "tmode") || die;
+	my $dboclass = "OOPS::$dbms";
+	unless ($loaded{$dbms}++) {
+		my $f = $dboclass->can("deadlock_rx") || die;
+		my @dl_rx = $f->();
+		@deadlock_rx{@dl_rx} = ($dbms) x @dl_rx;
+		my $rx = join('|', keys %deadlock_rx);
+		$OOPS::transfailrx = qr/$rx/;
+	}
+
+	my $tmode = $dboclass->can("tmode") || die;
 	&$tmode(undef, $dbh, $args->{readonly} || 0);
 
 	return $dbh unless wantarray;
 
-	my $new = can("OOPS::$dbms", "new") || die;
+	my $new = $dboclass->can("new") || die;
 	my $dbo = &$new("OOPS::$dbms",
 		table_prefix		=> $prefix,
 		database		=> $database,
@@ -176,7 +189,7 @@ sub clean_query
 		$query = $map{$dbo->{dbms}} || $before;
 		print "Query selected = $query\n" if $OOPS::debug_queries & 16;
 	}
-	$query =~ s/\n/ /g;  # mysql query log is easier to debug
+	$query =~ s/\s\s+/ /g;  # mysql query log is easier to debug
 
 	return $query;
 }

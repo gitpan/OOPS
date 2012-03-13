@@ -1,38 +1,16 @@
-#!/usr/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib 
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-}
-BEGIN {
-	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
-		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
-		exit;
-	}
-}
-BEGIN {
-	for my $m (qw(Data::Dumper Clone::PP Data::Compare)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
-
-import Clone::PP qw(clone);
-import Data::Compare;
-
+use strict;
+use warnings;
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:slow :filter Data::Dumper Clone::PP);
+use Clone::PP qw(clone);
 use OOPS;
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
-use strict;
-use warnings;
 use diagnostics;
 use OOPS::TestCommon;
-
-modern_data_compare();
 
 print "1..1079\n";
 
@@ -223,32 +201,13 @@ sub myrcon
 sub mydocompare
 {
 	my ($x, $y) = @_;
-	my $r = Compare($x, $y);
+	my $r = compare($x, $y);
 	return $r if $r;
-
-	#my $x1 = Dumper($x);
-	#my $x2 = Dumper($y);
-	#return 1 if $x1 eq $x2;
-	##print "x1=$x1\nx2=$x2\n";
-	
-	#my $y1 = YAML::Dump($x);
-	#my $y2 = YAML::Dump($y);
-	#return 1 if $y1 eq $y2;
-	##print "y1=\n$y1\ny2=\n$y2\n";
-
-	#my $b1 = Data::Dump::dump($x);
-	#my $b2 = Data::Dump::dump($y);
-	#return 1 if $b1 eq $b2;
-	#print "b1=$b1\nb2=$b2\n";
 
 	my $c1 = ref2string($x);
 	my $c2 = ref2string($y);
 	return 1 if $c1 eq $c2;
 	print "c1=$c1\nc2=$c2\n";
-
-	#my $z1 = Data::XDumper::Dump($x);
-	#my $z2 = Data::XDumper::Dump($y);
-	#print "z1=$z1\nz2=$z2\n"; 
 
 	return 0;
 }

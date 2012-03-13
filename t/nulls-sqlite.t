@@ -1,46 +1,19 @@
-#!/usr/bin/perl -I../lib -I./..
+#!/usr/bin/perl -I../lib
 
 my $dbi_trace_turnon = 9999999999;
 my $dbi_trace_level = 0;
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
-		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
-		exit;
-	}
-
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-
-	for my $m (qw(Data::Dumper Clone::PP)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
-
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:slow :filter :sqlite Data::Dumper Clone::PP);
 use OOPS;
 require Carp::Heavy;
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
 use strict;
 use warnings;
-
 use OOPS::TestCommon;
-
-BEGIN	{
-	unless ($dbms =~ /sqlite/) {
-		print "1..0 # Skipped: this test is for DBD::SQLite only\n";
-		exit;
-	}
-}
-
-modern_data_compare();
-
-import Clone::PP qw(clone);
+use Clone::PP qw(clone);
 
 my $skipto = 0; # go directly to test number...
 

@@ -8,7 +8,6 @@ package OOPS::Setup; # dummy
 
 package OOPS;
 
-use UNIVERSAL;
 use strict;
 use warnings;
 
@@ -19,7 +18,6 @@ use warnings;
 # 	sqlite		no such table: PREFIXobject(1) at dbdimp.c
 #	postgresql	ERROR:  relation "PREFIXobject" does not exist
 #
-our $nodatarx = qr/Table '\S+object' doesn't exist|ERROR:  relation "\S+object" does not exist|no such table: \S+object\(1\) at dbdimp\.c/;
 our $gcgenstart = 10_000;
 our $last_reserved_oid = 100;
 
@@ -76,7 +74,8 @@ sub load_failure
 {
 	my ($oops, $err) = @_;
 
-	print "load_failure($err)\n" if $OOPS::debug_setup;
+	my $nodatarx = $oops->{dbo}->nodata_rx;
+	print "load_failure($err) -- compare to $nodatarx\n" if $OOPS::debug_setup;
 	return 0 unless $err =~ /$nodatarx/;
 
 	die "DBMS not initialized - use auto_initialize or initial_setup()\n" 

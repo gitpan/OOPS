@@ -1,38 +1,25 @@
-#!/usr/bin/perl -I../lib -I.. -I../Test-MultiFork -I../../Test-MultiFork
+#!/usr/bin/perl -I../lib
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-}
-
-
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:filter Test::MultiFork :inactivity Clone::PP);
 use OOPS;
 use OOPS::GC;
+use OOPS::TestCommon;
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
 use strict;
 use warnings;
 use diagnostics;
 use Digest::MD5 qw(md5_hex);
-
-use OOPS::TestCommon;
 use Clone::PP qw(clone);
+use Test::MultiFork qw(stderr bail_on_bad_plan);
 
-modern_data_compare();
-BEGIN {
-	unless (eval { require Test::MultiFork }) {
-		print "1..0 # Skipped: this test requires Test::MultiFork\n";
-		exit;
-	}
-	die $Test::MultiFork::VERSION unless $Test::MultiFork::VERSION >= 0.7;
-	$Test::MultiFork::inactivity = 60; 
-	import Test::MultiFork qw(stderr bail_on_bad_plan);
-}
+die $Test::MultiFork::VERSION unless $Test::MultiFork::VERSION >= 0.7;
 
 BEGIN	{
 	if ($DBD::SQLite::VERSION >= 1.0 && $ENV{HARNESS_ACTIVE}) {
-		print "1..0 # Skipped: DBD::SQLite 1.x is likely to fail this\n";
+		print "1..0 # Skip DBD::SQLite 1.x is likely to fail this\n";
 		exit;
 	}
 }

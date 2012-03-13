@@ -1,16 +1,8 @@
-#!/usr/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-}
-BEGIN {
-	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
-		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
-		exit;
-	}
-}
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:filter :slow);
 
 package OOPS::Test::delete;
 
@@ -24,7 +16,6 @@ use warnings;
 use diagnostics;
 use Digest::MD5 qw(md5_hex);
 
-modern_data_compare();
 print "1..363\n";
 
 sub selector {

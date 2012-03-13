@@ -29,6 +29,21 @@ sub new
 
 sub tmode {}
 
+sub lock_object {}
+
+sub deadlock_rx
+{
+	return (
+		qr/database is locked(?:\(\d+\) at dbdimp\.c line )?/,
+		qr/unable to open database file\(\d+\) at dbdimp\.c line/,
+	);
+}
+
+sub nodata_rx
+{
+	return qr/no such table: \S+object/;
+}
+
 sub initialize
 {
 	my $dbo = shift;

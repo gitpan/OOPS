@@ -1,16 +1,13 @@
-#!/usr/bin/perl -I../lib -I.. 
-
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-}
-
-print "1..4\n";
+#!/usr/bin/perl -I../lib
 
 delete $ENV{OOPS_INIT};
 
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:filter);
 use OOPS::TestCommon;  # creates database
+
+print "1..4\n";
 
 nocon;
 db_drop();

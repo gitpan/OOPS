@@ -1,41 +1,18 @@
-#!/usr/bin/perl -I../lib -I..
+#!/usr/bin/perl -I../lib
 
-BEGIN {unshift(@INC, eval { my $x = $INC[0]; $x =~ s!/OOPS(.*)/blib/lib$!/OOPS$1/t!g ? $x : ()})}
-BEGIN {
-	$OOPS::SelfFilter::defeat = 1
-		unless defined $OOPS::SelfFilter::defeat;
-}
-#BEGIN {
-#	if ($ENV{HARNESS_ACTIVE} && ! $ENV{OOPSTEST_SLOW}) {
-#		print "1..0 # Skipped: run this by hand or set \$ENV{OOPSTEST_SLOW}\n";
-#		exit;
-#	}
-#}
-BEGIN {
-	for my $m (qw(Data::Dumper Clone::PP)) {
-		unless ( eval " require $m " ) {
-			print "1..0 # Skipped: this test requires the $m module\n";
-			exit;
-		}
-		$m->import();
-	}
-}
-
-import Clone::PP qw(clone);
-
+use FindBin;
+use lib $FindBin::Bin;
+use OOPS::TestSetup qw(:filter Data::Dumper Clone::PP);
+use OOPS::TestCommon;
 use OOPS;
+use Clone::PP qw(clone);
 use Carp qw(confess);
 use Scalar::Util qw(reftype);
 use strict;
 use warnings;
 use diagnostics;
 
-use OOPS::TestCommon;
-
-modern_data_compare();
-
 print "1..489\n";
-
 
 resetall; # --------------------------------------------------
 {
@@ -101,13 +78,13 @@ resetall; # --------------------------------------------------
 		COMPARE
 
 		CP_VIRTUAL
-		$tcTODO = "Mysql columns are a bit narrow" if $r1->{dbo}{dbms} eq 'mysql';
+		$::width = $r1->{dbo}{dbms} eq 'mysql' ? 37 : 57;
 		%$root = ();
-		my $x = getref(%$root, 'FOO23' x 57);
-		$root->{'FOO23' x 57} = \$x;
+		my $x = getref(%$root, 'FOO23' x $::width);
+		$root->{'FOO23' x $::width} = \$x;
 		CP_COMMIT
 		CP_COMPARE
-		delete $root->{'FOO23' x 57};
+		delete $root->{'FOO23' x $::width};
 		CP_COMPARE
 		CP_COMMIT
 		COMPARE

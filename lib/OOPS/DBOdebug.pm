@@ -43,7 +43,6 @@ package OOPS::DBO::DBIdebug;
 
 use strict;
 use warnings;
-use UNIVERSAL qw(can);
 use Carp qw(confess longmess);
 use POSIX qw(EAGAIN ENOENT EEXIST O_RDWR); 
 use Fcntl qw(LOCK_SH LOCK_EX LOCK_NB LOCK_UN);
@@ -65,8 +64,10 @@ sub new
 	$self->output("Connect");
 	$self->{lastq} = \$lastq;
 	push(@OOPS::transaction_rollback, sub {
-		print STDERR "Last query before rollback: ${$self->{lastq}}\n"
-			unless ${$self->{lastq}} =~ /^(idle|disconnect)$/
+		my $lq = ${$self->{lastq}};
+		$lq = "<UNDEF>" unless defined $lq;
+		print STDERR "Last query before rollback: $lq\n"
+			unless $lq =~ /^(idle|disconnect)$/
 	}) if $OOPS::transaction_tries;
 	return $self;
 }
@@ -88,7 +89,7 @@ sub AUTOLOAD
 	my $a = $AUTOLOAD;
 	$a =~ s/.*:://;
 	die "USING AUTOLOAD ON $self->{dbh} ->$a()\n";
-	my $method = can($self->{dbh},$a) || can($self->{dbh}, $AUTOLOAD) || confess "cannot find method $a for $self->[0]";
+	my $method = $self->{dbh}->can($a) || $self->{dbh}->can($AUTOLOAD) || confess "cannot find method $a for $self->[0]";
 	my @r;
 	if (wantarray) {
 		@r = &$method($self->{dbh}, @_);
@@ -232,6 +233,7 @@ sub preformat
 		}
 		$display .= shift(@q);
 	}
+	$display = "<UNDEF>" unless defined $display;
 	$display =~ s/\s+$//;
 	return $display;
 }
@@ -248,7 +250,7 @@ sub output
 {
 	my $self = shift;
 	my $code = shift;
-	my $stuff = join('', @_);
+	my $stuff = join('', map { defined $_ ? $_ : '<UNDEF>' } @_);
 	$stuff =~ s/^\s+//;
 	if ($ENV{OOPS_DEBUGLOG}) {
 		flock(DBOdebug, LOCK_EX);
